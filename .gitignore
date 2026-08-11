@@ -1,0 +1,10 @@
+node_modules/
+dist/
+vendor/worldengine/.venv/
+*.world
+.DS_Store
+__pycache__/
+*.pyc
+.python-version
+
+vendor/
