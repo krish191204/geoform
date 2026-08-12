@@ -1,0 +1,18 @@
+{
+  "id": "cascades-rain-shadow",
+  "description": "Earth-pattern (Cascades-like): wet Pacific west, N–S crest, dry inland east — not a copyrighted basemap screenshot",
+  "corpus": "earth-pattern",
+  "mode": "painted",
+  "mustFind": [],
+  "mustNotFind": [
+    {
+      "titleIncludes": "Rain shadow probably flipped"
+    },
+    {
+      "titleIncludes": "Desert kisses jungle"
+    }
+  ],
+  "score": {
+    "min": 45
+  }
+}

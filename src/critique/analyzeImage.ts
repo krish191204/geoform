@@ -1,4 +1,5 @@
 import type { CritiqueResult, MapIssue, Severity } from './types'
+import { sampleBrokenDesertJungle, sampleToCanvas } from './sampleMaps'
 
 export type ImageMode = 'auto' | 'painted' | 'heightmap'
 
@@ -44,8 +45,21 @@ export async function analyzeImageElement(
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.drawImage(bmp, 0, 0, w, h)
   const { data } = ctx.getImageData(0, 0, w, h)
+  return analyzeRawPixels(data, w, h, label, mode)
+}
 
-  const detected = mode === 'auto' ? detectMode(data, w, h) : mode
+/** DOM-free entry for tests and fixture generators. */
+export function analyzeRawPixels(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  label: string,
+  mode: ImageMode = 'auto',
+): CritiqueResult {
+  if (data.length !== w * h * 4) {
+    throw new Error(`RGBA length ${data.length} ≠ ${w * h * 4}`)
+  }
+  const detected = mode === 'auto' ? detectMode(data, w, h) : mode === 'painted' || mode === 'heightmap' ? mode : 'painted'
   const maps = buildMaps(data, w, h, detected)
   const issues = critiquePixels(maps, data)
   const score = grade(issues)
@@ -135,8 +149,8 @@ function buildMaps(
     }
   }
 
-  // edge-connected ocean flood cleans lakes vs sea
-  floodOcean(water, w, h)
+  // edge-connected ocean flood; inland water can still be lake/river paint
+  const ocean = floodOcean(water, w, h)
 
   // local relief (mountain proxy)
   for (let y = 1; y < h - 1; y++) {
@@ -153,11 +167,11 @@ function buildMaps(
     }
   }
 
-  // rivers: thin blue-ish strokes not in ocean mass
+  // rivers: thin blue-ish strokes — including inland water paint that isn't ocean
   for (let y = 2; y < h - 2; y++) {
     for (let x = 2; x < w - 2; x++) {
       const i = y * w + x
-      if (water[i] > 0.5) continue
+      if (ocean[i]) continue
       const o = i * 4
       const r = data[o] / 255
       const g = data[o + 1] / 255
@@ -165,17 +179,27 @@ function buildMaps(
       const L = lum[i]
       const blueDom = b - Math.max(r, g)
       const teal = b > 0.28 && g > 0.22 && r < 0.35 && L < 0.7
-      if (!(blueDom > 0.045 || teal)) continue
+      const wetPaint = water[i] > 0.5
+      if (!(blueDom > 0.045 || teal || wetPaint)) continue
       let oceanN = 0
       let landN = 0
       for (let dy = -3; dy <= 3; dy++) {
         for (let dx = -3; dx <= 3; dx++) {
-          if (water[(y + dy) * w + (x + dx)] > 0.5) oceanN++
-          else landN++
+          const j = (y + dy) * w + (x + dx)
+          if (ocean[j]) oceanN++
+          else if (water[j] < 0.5) landN++
         }
       }
-      // thin corridor through land, not a bay
-      if (oceanN < 8 && landN > 20) river[i] = clamp(0.4 + blueDom * 2.5, 0.4, 1)
+      // thin corridor through land, not a bay / lake blob
+      let waterN = 0
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (water[(y + dy) * w + (x + dx)] > 0.5 && !ocean[(y + dy) * w + (x + dx)]) waterN++
+        }
+      }
+      if (oceanN < 6 && landN > 18 && waterN < 22) {
+        river[i] = clamp(0.45 + Math.max(blueDom, wetPaint ? 0.2 : 0) * 2.2, 0.45, 1)
+      }
     }
   }
 
@@ -202,14 +226,14 @@ function buildMaps(
   return { w, h, elev, moist, water, river, ice, relief, mode }
 }
 
-function floodOcean(water: Float32Array, w: number, h: number) {
-  const seen = new Uint8Array(w * h)
+function floodOcean(water: Float32Array, w: number, h: number): Uint8Array {
+  const ocean = new Uint8Array(w * h)
   const q: number[] = []
   const push = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= w || y >= h) return
     const i = y * w + x
-    if (seen[i] || water[i] < 0.5) return
-    seen[i] = 1
+    if (ocean[i] || water[i] < 0.5) return
+    ocean[i] = 1
     q.push(i)
   }
   for (let x = 0; x < w; x++) {
@@ -229,9 +253,7 @@ function floodOcean(water: Float32Array, w: number, h: number) {
     push(x, y + 1)
     push(x, y - 1)
   }
-  // inland water kept as lakes (still water=1); mark non-edge water separately later if needed
-  // For elev, lakes already low. Optional: demote tiny enclosed blobs already handled.
-  void seen
+  return ocean
 }
 
 function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
@@ -738,74 +760,9 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   })
 }
 
-/** Procedural broken map drawn to canvas — no JSON involved */
+/** Procedural broken map — shared with fixture generators. */
 export function makeBrokenSampleCanvas(): HTMLCanvasElement {
-  const w = 640
-  const h = 384
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d')!
-
-  // ocean
-  const ocean = ctx.createLinearGradient(0, 0, w * 0.4, 0)
-  ocean.addColorStop(0, '#1a5a72')
-  ocean.addColorStop(1, '#2a7a88')
-  ctx.fillStyle = ocean
-  ctx.fillRect(0, 0, w, h)
-
-  // continent
-  ctx.fillStyle = '#5f9a58'
-  ctx.beginPath()
-  ctx.moveTo(w * 0.22, h * 0.15)
-  ctx.bezierCurveTo(w * 0.5, h * 0.05, w * 0.85, h * 0.2, w * 0.9, h * 0.55)
-  ctx.bezierCurveTo(w * 0.88, h * 0.9, w * 0.4, h * 0.95, w * 0.25, h * 0.7)
-  ctx.closePath()
-  ctx.fill()
-
-  // desert glued to jungle (no mountain)
-  ctx.fillStyle = '#d2b36a'
-  ctx.beginPath()
-  ctx.ellipse(w * 0.72, h * 0.42, w * 0.14, h * 0.16, 0, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#2f7a40'
-  ctx.beginPath()
-  ctx.ellipse(w * 0.52, h * 0.4, w * 0.12, h * 0.14, 0.2, 0, Math.PI * 2)
-  ctx.fill()
-
-  // lonely spike peaks
-  ctx.fillStyle = '#cfc8c0'
-  for (const [x, y] of [
-    [0.35, 0.55],
-    [0.8, 0.7],
-    [0.6, 0.22],
-  ] as const) {
-    ctx.beginPath()
-    ctx.moveTo(w * x, h * y - 28)
-    ctx.lineTo(w * x + 18, h * y + 10)
-    ctx.lineTo(w * x - 18, h * y + 10)
-    ctx.fill()
-  }
-
-  // river climbing over a ridge
-  ctx.strokeStyle = '#3a8ec0'
-  ctx.lineWidth = 5
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(w * 0.28, h * 0.62)
-  ctx.bezierCurveTo(w * 0.45, h * 0.5, w * 0.55, h * 0.25, w * 0.7, h * 0.2)
-  ctx.stroke()
-
-  // city in water + on peak
-  ctx.fillStyle = '#1a1a1a'
-  ctx.beginPath()
-  ctx.arc(w * 0.12, h * 0.5, 5, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.beginPath()
-  ctx.arc(w * 0.35, h * 0.55 - 20, 5, 0, Math.PI * 2)
-  ctx.fill()
-
-  return c
+  return sampleToCanvas(sampleBrokenDesertJungle())
 }
 
 export function severityRank(s: Severity) {

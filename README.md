@@ -248,7 +248,10 @@ Full requirements (datasets, math, skills, storage, phases):
 - Immersive interactive page: [http://127.0.0.1:5173/roadmap.html](http://127.0.0.1:5173/roadmap.html) (also linked from the map editor)
 - Geography labs (elevation, rivers, rain shadow, tectonics, settlement): [http://127.0.0.1:5173/labs.html](http://127.0.0.1:5173/labs.html)
 - Map critique (upload a map image, get a geography roast): [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html)
+- Training / test corpus policy: [`docs/TRAINING_AND_TESTS.md`](docs/TRAINING_AND_TESTS.md)
 - Report: [`docs/ACCURACY_ROADMAP.md`](docs/ACCURACY_ROADMAP.md)
+
+Critique regression: `npm run fixtures:critique && npm test`
 
 Tooling references cloned locally under `vendor-skills/` (gitignored): shadcn-ui MCP, anthropics/skills, ui-ux-pro-max, Convex agent-skills.
 
