@@ -1,0 +1,15 @@
+{
+  "id": "andes-rain-shadow",
+  "description": "Earth-pattern Andes-like dry west coast / high crest / greener east",
+  "corpus": "earth-pattern",
+  "mode": "painted",
+  "mustFind": [],
+  "mustNotFind": [
+    {
+      "titleIncludes": "Desert kisses jungle"
+    }
+  ],
+  "score": {
+    "min": 40
+  }
+}

@@ -8,3 +8,11 @@ vendor-skills/
 __pycache__/
 *.pyc
 .python-version
+
+# Track A raw downloads (keep folder .gitkeep via aoi:init)
+data/raw/**/*
+!data/raw/**/.gitkeep
+data/staging/**/*
+!data/staging/**/.gitkeep
+data/derived/**/*
+!data/derived/**/.gitkeep

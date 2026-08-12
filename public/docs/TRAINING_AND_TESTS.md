@@ -1,76 +1,62 @@
 # Training and tests corpus policy
 
-**Status:** active policy for Geoform accuracy + map critique  
+**Status:** active — Track B harness running; Track A Phase 0 started (Cascades AOI catalog)  
 **Companion:** [ACCURACY_ROADMAP.md](./ACCURACY_ROADMAP.md)
 
 ## What “training” means
 
-Geoform has two different loops. Do not mix them.
-
 | Track | Goal | Allowed corpus | Forbidden corpus |
 |-------|------|----------------|------------------|
-| **A · Physics calibration** | Fit precip / lapse / hydro / settlement responses (T1) | Real Earth AOI grids (DEM, WorldClim/CHELSA, ERA5, HydroSHEDS) | Fantasy atlas art, Middle-earth, Westeros, style-reference PNGs |
-| **B · Critique regression** | Prove the image critic catches known geography mistakes | Synthetic cursed maps, Earth-pattern composites you generate, maps you own | Copyrighted IP scans in the public repo; using fantasy maps as climate labels |
-
-Fantasy continents are stories about land. Earth grids are measurements. Fitting climate on Tolkien encodes myth as physics.
+| **A · Physics calibration** | Fit precip / lapse / hydro / settlement (T1) | Real Earth AOI grids in `data/` | Fantasy atlas art, Middle-earth, Westeros |
+| **B · Critique regression** | Prove the image critic catches geography mistakes | Synthetic, earth-pattern, owned fantasy fixtures | Copyrighted IP scans in the public repo; fantasy maps as climate labels |
 
 ```
 Earth AOI grids ──► calibrate physics ──► Geoform recompute
-Synthetic / owned map images ──► labeled issues ──► critique Vitest suite
+Synthetic / owned map images ──► labeled issues ──► critique Vitest + /critique.html gallery
 ```
 
-## Track A (real Earth only)
+## Track A — started
 
-Follow [ACCURACY_ROADMAP.md](./ACCURACY_ROADMAP.md) §6–8:
+- AOI #1: **Cascades rain-shadow strip** (`data/catalog.yaml`)
+- Folder layout: `npm run aoi:init`
+- Fetch checklist: `npm run aoi:fetch -- --dry-run`
+- Skill: [`skills/geoform-geography/SKILL.md`](../skills/geoform-geography/SKILL.md)
 
-1. Pick 1–3 AOIs (Cascades, western Andes, NZ Alps, …).
-2. Ingest DEM + climate + wind for that bbox only.
-3. Fit orography / lapse / flow with **spatial-block** holdouts.
-4. Acceptance: raise a ridge → lee dries like Earth residuals.
+Raw DEM/WorldClim/ERA5 downloads are **planned** (need account + storage). Do not start an image neural net for climate until those grids exist and a spatial-block fit lands.
 
-**Do not start an image neural net for climate** until Track A has a real AOI and fitted coefficients.
-
-## Track B (critique fixtures)
-
-Harness: Vitest + `tests/critique/fixtures/` (PNG + JSON sidecar).
+## Track B — running
 
 ```bash
-npm run fixtures:critique   # regenerate procedural PNGs + sidecars
-npm test                    # run regression suite
+npm run fixtures:critique
+npm test
 ```
 
-### Fixture schema (`*.json` beside each `*.png`)
+Open [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html) → **Fixture gallery** → Grade all / click a card.
 
-- `corpus`: `synthetic` | `earth-pattern` | `fantasy-owned`
-- `mustFind` / `mustNotFind`: match on `kind`, `titleIncludes`, optional `minSeverity`
-- `score.min` / `score.max`: soft grade bounds
-
-Current seed pack:
+### Current pack
 
 | Id | Corpus | Intent |
 |----|--------|--------|
 | `broken-desert-jungle` | synthetic | Desert glued to jungle |
 | `broken-river-ridge` | synthetic | River cresting a ridge |
 | `broken-stranded-rivers` | synthetic | Streams that never reach water |
-| `cascades-rain-shadow` | earth-pattern | Wet west / crest / dry east (Cascades-like pattern, **not** a copyrighted basemap screenshot) |
+| `broken-hot-peaks` | synthetic | Warm-painted highlands |
+| `broken-pepper-peaks` | synthetic | Isolated pinnacles |
+| `cascades-rain-shadow` | earth-pattern | Wet west / crest / dry east |
+| `andes-rain-shadow` | earth-pattern | Dry west coast / crest / greener east |
+| `fantasy-owned-coherent` | fantasy-owned | Self-drawn coherent continent |
+| `fantasy-owned-broken` | fantasy-owned | Self-drawn flipped shadow + uphill stream |
 
-Generators live in [`src/critique/sampleMaps.ts`](../src/critique/sampleMaps.ts). Analyzer entry for tests: `analyzeRawPixels`.
+Generators: [`src/critique/sampleMaps.ts`](../src/critique/sampleMaps.ts).
 
-### Growing the pack (~12–20 images)
+## Copyright
 
-- More synthetic cursed maps (controlled ground truth).
-- More Earth-pattern composites for known rain shadows (self-drawn / public-domain only).
-- Fantasy-like maps **you own** or that are public domain.
-- Famous IP (Middle-earth / Westeros): **local/private eval only** unless you have license rights — never commit those stills to the public repo.
-
-## Copyright / ethics
-
-- Do **not** ship Tolkien / GRRM map scans as a public training or test dataset.
-- Prefer public-domain Earth knowledge patterns, your own drawings, and procedural samples.
-- Private folders for copyrighted reference maps are fine for personal eval; keep them gitignored.
+- No Tolkien/GRRM scans in the public repo.
+- Prefer procedural / self-drawn / public-domain earth patterns.
+- Private licensed refs stay gitignored.
 
 ## Verdict
 
-- **Calibrate** on real parts of the world.
-- **Test** the critic on synthetic + owned / earth-pattern maps (and private fantasy refs if licensed).
-- **Do not train** climate/generator weights on famous fantasy maps.
+- **Calibrate** on real Earth (Track A in progress).
+- **Test** the critic on the fixture gallery (Track B live).
+- **Do not** train climate weights on famous fantasy maps.

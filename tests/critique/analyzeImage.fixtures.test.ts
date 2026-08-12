@@ -3,25 +3,19 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { analyzeRawPixels } from '../../src/critique/analyzeImage'
-import {
-  sampleBrokenDesertJungle,
-  sampleBrokenRiverRidge,
-  sampleBrokenStrandedRivers,
-  sampleCascadesRainShadow,
-  type SampleMap,
-} from '../../src/critique/sampleMaps'
+import { ALL_SAMPLE_BUILDERS, type SampleMap } from '../../src/critique/sampleMaps'
 import type { MapIssue } from '../../src/critique/types'
 import { SEVERITY_ORDER, type CritiqueFixtureExpect } from './fixtureSchema'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const fixturesDir = join(__dirname, 'fixtures')
 
-const SAMPLES: Record<string, () => SampleMap> = {
-  'broken-desert-jungle': sampleBrokenDesertJungle,
-  'broken-river-ridge': sampleBrokenRiverRidge,
-  'broken-stranded-rivers': sampleBrokenStrandedRivers,
-  'cascades-rain-shadow': sampleCascadesRainShadow,
-}
+const SAMPLES: Record<string, () => SampleMap> = Object.fromEntries(
+  ALL_SAMPLE_BUILDERS.map((b) => {
+    const s = b()
+    return [s.id, b]
+  }),
+)
 
 function loadExpect(id: string): CritiqueFixtureExpect {
   return JSON.parse(readFileSync(join(fixturesDir, `${id}.json`), 'utf8')) as CritiqueFixtureExpect
@@ -48,8 +42,8 @@ describe('critique fixture pack', () => {
     .map((f) => f.replace(/\.json$/, ''))
     .sort()
 
-  it('has PNG + JSON pairs for every fixture', () => {
-    expect(ids.length).toBeGreaterThanOrEqual(4)
+  it('ships a seeded pack (≥8) with PNG + JSON + generators', () => {
+    expect(ids.length).toBeGreaterThanOrEqual(8)
     for (const id of ids) {
       expect(readdirSync(fixturesDir)).toContain(`${id}.png`)
       expect(SAMPLES[id], `missing sample generator for ${id}`).toBeTypeOf('function')
@@ -81,12 +75,8 @@ describe('critique fixture pack', () => {
         expect(hit, `must not find ${JSON.stringify(rule)} but got ${hit?.title}`).toBeFalsy()
       }
 
-      if (expectSpec.score?.min != null) {
-        expect(result.score).toBeGreaterThanOrEqual(expectSpec.score.min)
-      }
-      if (expectSpec.score?.max != null) {
-        expect(result.score).toBeLessThanOrEqual(expectSpec.score.max)
-      }
+      if (expectSpec.score?.min != null) expect(result.score).toBeGreaterThanOrEqual(expectSpec.score.min)
+      if (expectSpec.score?.max != null) expect(result.score).toBeLessThanOrEqual(expectSpec.score.max)
     })
   }
 })

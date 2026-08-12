@@ -223,6 +223,12 @@ function buildMaps(
   }
   river.set(river2)
 
+  // Stream paint is blue-gray; without this boost it reads as "arid" in moist and
+  // poisons rain-shadow / desert-jungle checks next to channels.
+  for (let i = 0; i < w * h; i++) {
+    if (river[i] > 0.35) moist[i] = Math.max(moist[i], 0.72)
+  }
+
   return { w, h, elev, moist, water, river, ice, relief, mode }
 }
 
@@ -331,38 +337,71 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
     }
   }
 
-  // ——— Endorheic weirdness: rivers that never reach water ———
+  // ——— Endorheic weirdness: river networks that never reach water ———
   {
-    let stranded = 0
-    let sx = 0
-    let sy = 0
-    for (let y = 2; y < h - 2; y += 2) {
-      for (let x = 2; x < w - 2; x += 2) {
-        const i = y * w + x
-        if (river[i] < 0.5) continue
-        let touches = false
-        for (let dy = -6; dy <= 6 && !touches; dy++) {
-          for (let dx = -6; dx <= 6; dx++) {
-            const nx = x + dx
-            const ny = y + dy
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
-            if (water[ny * w + nx] > 0.5) touches = true
+    const reach = new Uint8Array(w * h)
+    const q: number[] = []
+    for (let i = 0; i < w * h; i++) {
+      if (water[i] <= 0.5) continue
+      // seed from water that touches a river corridor
+      const x = i % w
+      const y = (i / w) | 0
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+          const j = ny * w + nx
+          if (river[j] >= 0.45 && !reach[j]) {
+            reach[j] = 1
+            q.push(j)
           }
-        }
-        if (!touches) {
-          stranded++
-          sx = x
-          sy = y
         }
       }
     }
-    if (stranded > 10) {
+    for (let qi = 0; qi < q.length; qi++) {
+      const i = q[qi]
+      const x = i % w
+      const y = (i / w) | 0
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+        [1, 1],
+        [1, -1],
+        [-1, 1],
+        [-1, -1],
+      ] as const) {
+        const nx = x + dx
+        const ny = y + dy
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+        const j = ny * w + nx
+        if (reach[j] || river[j] < 0.45) continue
+        reach[j] = 1
+        q.push(j)
+      }
+    }
+    let stranded = 0
+    let riverCells = 0
+    let sx = 0
+    let sy = 0
+    for (let i = 0; i < w * h; i++) {
+      if (river[i] < 0.5) continue
+      riverCells++
+      if (!reach[i]) {
+        stranded++
+        sx = i % w
+        sy = (i / w) | 0
+      }
+    }
+    if (riverCells > 12 && stranded > Math.max(10, riverCells * 0.45)) {
       issues.push({
         id: id(),
         severity: 'major',
         kind: 'hydro',
         title: 'Rivers to nowhere',
-        critique: `${stranded} stream samples never approach a coast or lake. Unless you mean endorheic basins, rivers should empty somewhere.`,
+        critique: `${stranded} of ${riverCells} stream samples never reach a coast or lake through the channel network. Unless you mean endorheic basins, rivers should empty somewhere.`,
         fix: 'Connect trunks to the sea, or terminate in a labeled inland sea / salt flat.',
         at: { x: sx / w, y: sy / h },
         confidence: 0.72,
@@ -406,20 +445,39 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
     let hits = 0
     let hx = 0
     let hy = 0
-    for (let y = 3; y < h - 3; y += 2) {
-      for (let x = 3; x < w - 3; x += 2) {
+    for (let y = 4; y < h - 4; y += 2) {
+      for (let x = 4; x < w - 4; x += 2) {
         const i = y * w + x
-        if (water[i] > 0.5) continue
+        if (water[i] > 0.5 || river[i] > 0.35) continue
         for (const [dx, dy] of [
-          [4, 0],
-          [0, 4],
+          [6, 0],
+          [0, 6],
+          [6, 6],
+          [6, -6],
         ] as const) {
-          const j = (y + dy) * w + (x + dx)
-          if (water[j] > 0.5) continue
-          if (Math.abs(moist[i] - moist[j]) < 0.42) continue
-          const mid = elev[y * w + ((x + dx / 2) | 0)] // approx
-          const barrier = Math.max(elev[i], elev[j], mid, relief[i] * 3)
-          if (barrier < 0.5 && relief[i] < 0.05 && relief[j] < 0.05) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 2 || ny < 2 || nx >= w - 2 || ny >= h - 2) continue
+          const j = ny * w + nx
+          if (water[j] > 0.5 || river[j] > 0.35) continue
+          const hi = Math.max(moist[i], moist[j])
+          const lo = Math.min(moist[i], moist[j])
+          // true jungle/forest vs arid — ignore mild grassland steps
+          if (hi < 0.55 || lo > 0.2) continue
+          // orographic barrier = real highland (snow/ice or bright rock), not biome elev jumps
+          const steps = Math.max(Math.abs(dx), Math.abs(dy), 1)
+          let hasRidge = false
+          for (let t = 0; t <= steps; t++) {
+            const xx = x + Math.round((dx * t) / steps)
+            const yy = y + Math.round((dy * t) / steps)
+            const k = yy * w + xx
+            if (ice[k] > 0.5 || elev[k] > 0.72) {
+              hasRidge = true
+              break
+            }
+          }
+          if (hasRidge) continue
+          if (relief[i] < 0.06 && relief[j] < 0.06) {
             hits++
             hx = x
             hy = y
@@ -427,7 +485,7 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
         }
       }
     }
-    if (hits > 8) {
+    if (hits > 10) {
       issues.push({
         id: id(),
         severity: 'critical',
@@ -447,11 +505,14 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
     let fx = 0
     let fy = 0
     for (let y = 4; y < h - 4; y += 3) {
-      for (let x = 6; x < w - 6; x += 3) {
+      for (let x = 10; x < w - 10; x += 3) {
         const i = y * w + x
-        if (water[i] > 0.5 || relief[i] < 0.06 || elev[i] < 0.45) continue
-        const mW = moist[y * w + (x - 4)]
-        const mE = moist[y * w + (x + 4)]
+        if (water[i] > 0.5 || river[i] > 0.35 || relief[i] < 0.06 || elev[i] < 0.45) continue
+        const iW = y * w + (x - 8)
+        const iE = y * w + (x + 8)
+        if (water[iW] > 0.5 || water[iE] > 0.5 || river[iW] > 0.35 || river[iE] > 0.35) continue
+        const mW = moist[iW]
+        const mE = moist[iE]
         // assume west wind: lee (east) should be drier
         if (mE > mW + 0.22) {
           flips++
@@ -460,7 +521,7 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
         }
       }
     }
-    if (flips > 6) {
+    if (flips > 4) {
       issues.push({
         id: id(),
         severity: 'major',
@@ -484,22 +545,24 @@ function critiquePixels(maps: PixelMaps, data: Uint8ClampedArray): MapIssue[] {
     for (let y = 2; y < h - 2; y++) {
       for (let x = 2; x < w - 2; x++) {
         const i = y * w + x
-        if (water[i] > 0.5 || elev[i] < 0.62 || relief[i] < 0.05) continue
+        if (water[i] > 0.5 || elev[i] < 0.58 || relief[i] < 0.035) continue
         peaks++
         let near = 0
-        for (let dy = -3; dy <= 3; dy++) {
-          for (let dx = -3; dx <= 3; dx++) {
-            if (elev[(y + dy) * w + (x + dx)] > 0.55) near++
+        for (let dy = -4; dy <= 4; dy++) {
+          for (let dx = -4; dx <= 4; dx++) {
+            if (Math.abs(dx) + Math.abs(dy) === 0) continue
+            if (elev[(y + dy) * w + (x + dx)] > 0.52) near++
           }
         }
-        if (near < 8) {
+        // isolated spike: few highland neighbors in the ring
+        if (near < 6) {
           lonely++
           px = x
           py = y
         }
       }
     }
-    if (peaks > 20 && lonely / peaks > 0.4) {
+    if (peaks > 8 && lonely / peaks > 0.22) {
       issues.push({
         id: id(),
         severity: 'minor',

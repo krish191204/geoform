@@ -1,12 +1,12 @@
 import './style.css'
 import {
-  analyzeImageElement,
   analyzeMapImage,
-  makeBrokenSampleCanvas,
+  analyzeRawPixels,
   type ImageMode,
 } from './analyzeImage'
 import { analyzeGeoformWorld } from './analyzeWorld'
 import { drawCritiquePreview } from './preview'
+import { getAllSamples, sampleToCanvas, type SampleMap } from './sampleMaps'
 import { KIND_LABEL, SEVERITY_LABEL, type CritiqueResult, type IssueKind, type Severity } from './types'
 
 const root = document.querySelector<HTMLDivElement>('#critique-root')!
@@ -18,8 +18,10 @@ let previewImage: ImageBitmap | HTMLImageElement | HTMLCanvasElement | null = nu
 let raf = 0
 let mode: ImageMode = 'auto'
 let lastFile: File | null = null
+let galleryScores: Record<string, number> = {}
 
 function render() {
+  const samples = getAllSamples()
   root.innerHTML = `
     <div class="shell">
       <nav class="topnav">
@@ -28,6 +30,7 @@ function render() {
           <a href="/">Map editor</a>
           <a href="/labs.html">Geography labs</a>
           <a href="/roadmap.html">Accuracy roadmap</a>
+          <a href="/docs/TRAINING_AND_TESTS.md">Training policy</a>
         </div>
       </nav>
 
@@ -35,20 +38,31 @@ function render() {
         <div class="hero-veil"></div>
         <div class="hero-copy">
           <h1>Geoform</h1>
-          <p>Drop a map image. We read water, rivers, biomes, and relief from the pixels — then roast what breaks geography.</p>
+          <p>Upload a map — or run the fixture gallery. Synthetic crimes, Earth-pattern rain shadows, and owned fantasy benchmarks get graded live.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" id="pickFile">Upload image</button>
-            <button type="button" class="chip-btn" id="loadBroken">Try a broken sample</button>
+            <button type="button" class="chip-btn" data-jump="gallery">Open fixture gallery</button>
           </div>
         </div>
       </header>
 
+      <section class="panel" id="gallery">
+        <div class="section-head-inline">
+          <div>
+            <h2>Fixture gallery</h2>
+            <p class="muted">Click a card to run the same critic the Vitest suite uses. Corpus: synthetic · earth-pattern · fantasy-owned.</p>
+          </div>
+          <button type="button" class="chip-btn" id="gradeAll">Grade all</button>
+        </div>
+        <div class="gallery-grid" id="galleryGrid"></div>
+      </section>
+
       <section class="panel">
         <div class="drop" id="drop">
-          <h2>Drop a map image</h2>
+          <h2>Drop your own map image</h2>
           <p>
-            Built for <strong>PNG / JPG / WebP / GIF</strong> — painted atlases or grayscale heightmaps.
-            Auto-detects which one you gave it. Toggle below if it guesses wrong.
+            <strong>PNG / JPG / WebP / GIF</strong> — painted atlases or grayscale heightmaps.
+            Toggle mode if auto-detect guesses wrong.
           </p>
           <div class="mode-row" id="modeRow">
             <button type="button" class="chip-btn ${mode === 'auto' ? 'active' : ''}" data-mode="auto">Auto</button>
@@ -57,7 +71,6 @@ function render() {
           </div>
           <div class="drop-actions">
             <button type="button" class="chip-btn btn-primary" id="pickFile2">Choose image</button>
-            <button type="button" class="chip-btn" id="loadBroken2">Broken sample</button>
           </div>
           <input class="hidden-file" id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" />
         </div>
@@ -77,17 +90,63 @@ function render() {
       </section>
 
       <p class="footer-note">
-        Image critiques are geography heuristics from color &amp; shape — not a climate model.
-        Pair with the <a href="/labs.html">geography labs</a> to feel the rules yourself.
+        Policy: Earth AOIs calibrate physics; these images only benchmark the critic.
+        See <a href="/docs/TRAINING_AND_TESTS.md">TRAINING_AND_TESTS.md</a>.
       </p>
     </div>
   `
 
-  bind()
+  paintGallery(samples)
+  bind(samples)
   if (result) paintResult()
 }
 
-function bind() {
+function paintGallery(samples: SampleMap[]) {
+  const grid = root.querySelector('#galleryGrid')!
+  grid.innerHTML = samples
+    .map((s) => {
+      const score = galleryScores[s.id]
+      const canvas = sampleToCanvas(s)
+      const url = canvas.toDataURL('image/png')
+      return `
+      <button type="button" class="gallery-card" data-sample="${s.id}">
+        <img src="${url}" alt="${s.title}" />
+        <div class="gallery-meta">
+          <strong>${s.title}</strong>
+          <span class="corpus">${s.corpus}</span>
+          <span class="score-pill">${score == null ? '—' : score}</span>
+        </div>
+        <p>${s.blurb}</p>
+      </button>`
+    })
+    .join('')
+
+  grid.querySelectorAll<HTMLButtonElement>('[data-sample]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sample = samples.find((s) => s.id === btn.dataset.sample)
+      if (sample) void runSample(sample)
+    })
+  })
+}
+
+function gradeSample(sample: SampleMap) {
+  const r = analyzeRawPixels(sample.data, sample.width, sample.height, sample.id, mode === 'auto' ? sample.mode : mode)
+  galleryScores[sample.id] = r.score
+  return r
+}
+
+async function runSample(sample: SampleMap) {
+  lastFile = null
+  const r = gradeSample(sample)
+  result = r
+  previewImage = sampleToCanvas(sample)
+  activeId = r.issues[0]?.id ?? null
+  filter = 'all'
+  paintGallery(getAllSamples())
+  paintResult()
+}
+
+function bind(samples: SampleMap[]) {
   const file = root.querySelector<HTMLInputElement>('#file')!
   const drop = root.querySelector('#drop')!
   const open = () => file.click()
@@ -117,8 +176,7 @@ function bind() {
     })
   })
   drop.addEventListener('drop', async (e) => {
-    const dt = (e as DragEvent).dataTransfer
-    const f = dt?.files?.[0]
+    const f = (e as DragEvent).dataTransfer?.files?.[0]
     if (f) await ingest(f)
   })
 
@@ -127,20 +185,25 @@ function bind() {
       mode = btn.dataset.mode as ImageMode
       root.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('active', b === btn))
       if (lastFile) await ingest(lastFile)
-      else if (previewImage && result?.label.includes('Broken sample')) await loadBrokenSample()
     })
   })
 
-  root.querySelector('#loadBroken')?.addEventListener('click', () => void loadBrokenSample())
-  root.querySelector('#loadBroken2')?.addEventListener('click', () => void loadBrokenSample())
+  root.querySelector('#gradeAll')?.addEventListener('click', () => {
+    for (const s of samples) gradeSample(s)
+    paintGallery(getAllSamples())
+  })
+
+  root.querySelectorAll<HTMLButtonElement>('[data-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelector(`#${btn.dataset.jump}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  })
 }
 
 async function ingest(file: File) {
   try {
-    const isImage =
-      file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+    const isImage = file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(file.name)
     if (!isImage) {
-      // quiet fallback — not the product focus
       if (/\.json$/i.test(file.name) || file.type.includes('json')) {
         const text = await file.text()
         previewImage = null
@@ -181,8 +244,7 @@ function paintResult() {
   workspace.hidden = false
   workspace.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
-  const sb = root.querySelector('#scoreboard')!
-  sb.innerHTML = `
+  root.querySelector('#scoreboard')!.innerHTML = `
     <div class="score-card">
       <div class="label">Geography grade</div>
       <div class="big">${result.score}</div>
@@ -252,21 +314,7 @@ function paintResult() {
 }
 
 function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-async function loadBrokenSample() {
-  lastFile = null
-  const sample = makeBrokenSampleCanvas()
-  previewImage = sample
-  result = await analyzeImageElement(sample, 'Broken sample', mode)
-  activeId = result.issues[0]?.id ?? null
-  filter = 'all'
-  paintResult()
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 render()

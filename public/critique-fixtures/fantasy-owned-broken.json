@@ -1,0 +1,16 @@
+{
+  "id": "fantasy-owned-broken",
+  "description": "Self-drawn broken fantasy with flipped shadow / uphill stream",
+  "corpus": "fantasy-owned",
+  "mode": "painted",
+  "mustFind": [
+    {
+      "kind": "orography"
+    }
+  ],
+  "score": {
+    "max": 95
+  },
+  "title": "Owned broken fantasy",
+  "blurb": "Self-drawn fantasy with flipped rain shadow and uphill stream — benchmark only."
+}
