@@ -386,19 +386,30 @@ export class MapRenderer {
     }
 
     // Brush preview
-    if (opts.hover && (opts.tool === 'raise' || opts.tool === 'lower' || opts.tool === 'city')) {
+    if (
+      opts.hover &&
+      opts.tool &&
+      opts.tool !== 'inspect'
+    ) {
       const { x, y } = opts.hover
       const r = (opts.brush ?? 6) * scale
+      const isCarve = opts.tool === 'lower' || opts.tool === 'channel' || opts.tool === 'sea'
+      const isCity = opts.tool === 'city' || opts.tool === 'razecity'
       ctx.save()
       ctx.beginPath()
-      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, r, 0, Math.PI * 2)
-      ctx.strokeStyle = opts.tool === 'lower' ? 'rgba(180,70,40,0.85)' : 'rgba(243,238,220,0.9)'
-      ctx.lineWidth = opts.painting ? 2.4 : 1.5
-      ctx.setLineDash(opts.tool === 'city' ? [4, 4] : [])
+      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, isCity ? Math.max(10, r * 0.45) : r, 0, Math.PI * 2)
+      ctx.strokeStyle = isCarve
+        ? 'rgba(180,70,40,0.9)'
+        : opts.tool === 'razecity'
+          ? 'rgba(160,40,40,0.9)'
+          : opts.tool === 'smooth' || opts.tool === 'plateau'
+            ? 'rgba(90,140,160,0.9)'
+            : 'rgba(243,238,220,0.92)'
+      ctx.lineWidth = opts.painting ? 2.5 : 1.6
+      ctx.setLineDash(isCity ? [5, 4] : opts.tool === 'ridge' || opts.tool === 'channel' ? [6, 3] : [])
       ctx.stroke()
-      if (opts.tool !== 'city') {
-        ctx.fillStyle =
-          opts.tool === 'raise' ? 'rgba(243,238,220,0.08)' : 'rgba(180,70,40,0.08)'
+      if (!isCity) {
+        ctx.fillStyle = isCarve ? 'rgba(180,70,40,0.08)' : 'rgba(243,238,220,0.07)'
         ctx.fill()
       }
       ctx.restore()

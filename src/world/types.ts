@@ -7,7 +7,18 @@ export type Layer =
   | 'biome'
   | 'suitability'
 
-export type Tool = 'raise' | 'lower' | 'city' | 'inspect'
+export type Tool =
+  | 'raise'
+  | 'lower'
+  | 'smooth'
+  | 'ridge'
+  | 'channel'
+  | 'plateau'
+  | 'sea'
+  | 'land'
+  | 'city'
+  | 'razecity'
+  | 'inspect'
 
 /** WorldEngine Holdridge names + a few UI aliases */
 export type Biome = string
