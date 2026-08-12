@@ -332,6 +332,28 @@ button.primary:hover {
   pointer-events: auto;
 }
 
+.banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.primary-chip {
+  background: var(--ink) !important;
+  color: var(--paper) !important;
+  border-color: transparent !important;
+}
+
+.seed-row select {
+  font: inherit;
+  border-radius: 999px;
+  border: 1px solid rgba(28, 34, 28, 0.14);
+  background: rgba(255, 255, 255, 0.55);
+  padding: 0.4rem 0.75rem;
+  color: inherit;
+}
+
 .brand a {
   color: var(--copper);
 }

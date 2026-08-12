@@ -1,6 +1,6 @@
 import './style.css'
-import { evaluateSuitability, recomputeSuitability } from './world/climate'
-import { nextCityName, paintElevation } from './world/generate'
+import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
+import { generateWorld, nextCityName, paintElevation } from './world/generate'
 import {
   autosaveWorld,
   clearAutosave,
@@ -15,6 +15,9 @@ import type { Layer, Tool, World } from './world/types'
 const WIDTH = 320
 const HEIGHT = 160
 
+/** Prefer WorldEngine when available; always allow pure-browser local sim. */
+type EngineChoice = 'auto' | 'local' | 'worldengine'
+
 let seed = (Math.random() * 1e9) | 0
 let world: World | null = null
 let layer: Layer = 'relief'
@@ -28,6 +31,7 @@ let busy = false
 let recomputeTimer: number | null = null
 let recomputeGeneration = 0
 let autosaveTimer: number | null = null
+let engineChoice: EngineChoice = 'auto'
 const renderer = new MapRenderer()
 let raf = 0
 
@@ -71,6 +75,12 @@ function renderShell() {
         <a class="chip-link" href="/roadmap.html">Accuracy roadmap</a>
         <label for="seed">Seed</label>
         <input id="seed" type="number" value="${seed}" />
+        <label for="engine">Engine</label>
+        <select id="engine" title="WorldEngine needs Python API; Local runs entirely in the browser">
+          <option value="auto" ${engineChoice === 'auto' ? 'selected' : ''}>Auto</option>
+          <option value="local" ${engineChoice === 'local' ? 'selected' : ''}>Local (browser)</option>
+          <option value="worldengine" ${engineChoice === 'worldengine' ? 'selected' : ''}>WorldEngine</option>
+        </select>
         <button type="button" id="regen" class="primary">New world</button>
         <button type="button" id="randomize">Random seed</button>
         <button type="button" id="export">Export JSON</button>
@@ -91,7 +101,11 @@ function renderShell() {
           <label>Raise / lower strength</label>
           <input id="strength" type="range" min="1" max="12" value="${Math.round(strength * 100)}" />
         </div>
-        <p class="hint">Autosave is <strong>this browser only</strong> (no cloud sync). Use <strong>Export JSON</strong> for a file you can keep or share.</p>
+        <p class="hint">
+          <strong>Local</strong> = works with just <code>npm run dev</code> (browser sim).
+          <strong>WorldEngine</strong> = better plates/climate via Python API.
+          Autosave is this browser only — no cloud.
+        </p>
       </aside>
       <section class="map-shell">
         <canvas id="map"></canvas>
@@ -131,11 +145,20 @@ function showApiDown(detail: string) {
   banner.innerHTML = `
     <strong>WorldEngine API is offline</strong>
     <p>${detail}</p>
-    <p>In the project folder run <code>npm run setup:api</code> once, then keep both processes up:</p>
-    <pre>npm run dev:api
-npm run dev</pre>
-    <button type="button" class="chip" id="retryApi">Retry connection</button>
+    <p>Use the <strong>browser local engine</strong> instead — no Python required — or start the API:</p>
+    <pre>npm run setup:api && npm run dev:api</pre>
+    <div class="banner-actions">
+      <button type="button" class="chip primary-chip" id="useLocal">Use local engine</button>
+      <button type="button" class="chip" id="retryApi">Retry WorldEngine</button>
+    </div>
   `
+  banner.querySelector('#useLocal')?.addEventListener('click', () => {
+    engineChoice = 'local'
+    const sel = document.querySelector<HTMLSelectElement>('#engine')
+    if (sel) sel.value = 'local'
+    hideApiDown()
+    void loadWorld(seed)
+  })
   banner.querySelector('#retryApi')?.addEventListener('click', () => {
     void boot()
   })
@@ -149,28 +172,55 @@ function hideApiDown() {
   }
 }
 
+function loadLocalWorld(nextSeed: number, note?: string) {
+  setBusy(true, 'Generating local world in the browser…')
+  status = 'Generating with browser local engine…'
+  document.querySelector('#status')!.textContent = status
+  try {
+    const next = generateWorld(WIDTH, HEIGHT, nextSeed)
+    clearAutosave()
+    applyWorld(
+      next,
+      note ??
+        `Local engine seed ${next.seed} · ${next.plateCount} plates · instant climate (no Python)`,
+    )
+    hideApiDown()
+  } finally {
+    setBusy(false)
+  }
+}
+
 async function boot() {
   hideApiDown()
-  if (!(await apiHealthy())) {
-    status =
-      'WorldEngine API offline — map needs npm run dev:api on :8765 (Vite alone cannot generate worlds).'
-    document.querySelector('#status')!.textContent = status
-    showApiDown(
-      'The blank map is not a broken brush — the Python backend never answered. There is no cloud world store either; saves stay in this browser after a world exists.',
-    )
-    return
-  }
 
   const saved = loadAutosave()
   if (saved) {
     applyWorld(
       saved,
-      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities). Generate a new world to discard.`,
+      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities, ${saved.engine}). Generate a new world to discard.`,
     )
     const el = document.querySelector('#saveMeta')
     if (el) el.textContent = 'Restored from browser autosave'
     return
   }
+
+  const healthy = await apiHealthy()
+  if (engineChoice === 'local' || (engineChoice === 'auto' && !healthy)) {
+    if (engineChoice === 'auto' && !healthy) {
+      status = 'WorldEngine offline — using browser local engine.'
+      document.querySelector('#status')!.textContent = status
+    }
+    loadLocalWorld(seed)
+    return
+  }
+
+  if (!healthy) {
+    status = 'WorldEngine API offline.'
+    document.querySelector('#status')!.textContent = status
+    showApiDown('Nothing answered on :8765. You can still sculpt worlds with the local engine.')
+    return
+  }
+
   await loadWorld(seed)
 }
 
@@ -187,15 +237,27 @@ function setBusy(on: boolean, message?: string) {
 }
 
 async function loadWorld(nextSeed: number) {
-  setBusy(true, 'Running WorldEngine plate tectonics… (higher-res map, ~8s)')
+  if (engineChoice === 'local') {
+    loadLocalWorld(nextSeed)
+    return
+  }
+
+  const preferLocalFallback = engineChoice === 'auto'
+  setBusy(true, 'Running WorldEngine plate tectonics… (~few seconds)')
   status = 'Generating world with Mindwerks WorldEngine…'
   document.querySelector('#status')!.textContent = status
   try {
+    if (!(await apiHealthy())) throw new Error('Bad Gateway')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     clearAutosave()
     applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates · Holdridge biomes`)
+    hideApiDown()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    if (preferLocalFallback) {
+      loadLocalWorld(nextSeed, `WorldEngine unavailable (${msg}) — fell back to local engine.`)
+      return
+    }
     status = `WorldEngine error: ${msg}`
     document.querySelector('#status')!.textContent = status
     showApiDown(
@@ -208,13 +270,24 @@ async function loadWorld(nextSeed: number) {
   }
 }
 
-function scheduleWorldEngineRecompute() {
+function scheduleClimateRecompute() {
   if (!world) return
   if (recomputeTimer !== null) window.clearTimeout(recomputeTimer)
   const gen = ++recomputeGeneration
   recomputeTimer = window.setTimeout(() => {
     void (async () => {
       if (!world || gen !== recomputeGeneration) return
+
+      if (world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())) {
+        recomputeDerived(world)
+        renderer.invalidate()
+        scheduleAutosave()
+        status = 'Local climate updated (rain shadow, rivers, biomes).'
+        document.querySelector('#status')!.textContent = status
+        updateInspector()
+        return
+      }
+
       status = 'WorldEngine recomputing climate from edited terrain…'
       document.querySelector('#status')!.textContent = status
       try {
@@ -222,9 +295,13 @@ function scheduleWorldEngineRecompute() {
         if (gen !== recomputeGeneration) return
         applyWorld(next, 'WorldEngine climate updated (precipitation, humidity, biomes, rivers).')
       } catch (err) {
-        status = `Recompute failed: ${err instanceof Error ? err.message : String(err)}`
+        recomputeDerived(world)
+        renderer.invalidate()
+        scheduleAutosave()
+        status = `WorldEngine recompute failed — used local climate instead (${err instanceof Error ? err.message : String(err)})`
+        document.querySelector('#status')!.textContent = status
+        updateInspector()
       }
-      document.querySelector('#status')!.textContent = status
     })()
   }, 650)
 }
@@ -232,7 +309,7 @@ function scheduleWorldEngineRecompute() {
 function bind() {
   const tools = document.querySelector('#tools')!
   const toolDefs: { id: Tool; label: string; desc: string }[] = [
-    { id: 'raise', label: 'Raise', desc: 'Uplift — WorldEngine refreshes climate' },
+    { id: 'raise', label: 'Raise', desc: 'Uplift — climate recomputes' },
     { id: 'lower', label: 'Lower', desc: 'Erode or sink terrain' },
     { id: 'city', label: 'Found city', desc: 'Only where geography allows' },
     { id: 'inspect', label: 'Inspect', desc: 'Read elevation, climate, score' },
@@ -276,6 +353,10 @@ function bind() {
       btn.classList.add('active')
       // paint loop will redraw
     })
+  })
+
+  document.querySelector('#engine')!.addEventListener('change', (e) => {
+    engineChoice = (e.target as HTMLSelectElement).value as EngineChoice
   })
 
   document.querySelector('#brush')!.addEventListener('input', (e) => {
@@ -343,10 +424,13 @@ function bind() {
       paintElevation(world, cell.x, cell.y, brush, tool === 'raise' ? strength : -strength)
       renderer.invalidate()
       scheduleAutosave()
-      status = 'Terrain edited — waiting to recompute with WorldEngine…'
+      status =
+        world.engine === 'local'
+          ? 'Terrain edited — local climate will refresh…'
+          : 'Terrain edited — waiting to recompute climate…'
       updateInspector()
       document.querySelector('#status')!.textContent = status
-      scheduleWorldEngineRecompute()
+      scheduleClimateRecompute()
       return
     }
 
