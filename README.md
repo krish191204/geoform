@@ -241,6 +241,17 @@ Authoritative climate after sculpt always goes through the Python process; the T
 
 ---
 
+## Accuracy roadmap (Earth-grounded next stage)
+
+Full requirements (datasets, math, skills, storage, phases):
+
+- Immersive interactive page: [http://127.0.0.1:5173/roadmap.html](http://127.0.0.1:5173/roadmap.html) (also linked from the map editor)
+- Geography labs (elevation, rivers, rain shadow, tectonics, settlement): [http://127.0.0.1:5173/labs.html](http://127.0.0.1:5173/labs.html)
+- Map critique (upload a map image, get a geography roast): [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html)
+- Report: [`docs/ACCURACY_ROADMAP.md`](docs/ACCURACY_ROADMAP.md)
+
+Tooling references cloned locally under `vendor-skills/` (gitignored): shadcn-ui MCP, anthropics/skills, ui-ux-pro-max, Convex agent-skills.
+
 ## What is explicitly not in the stack
 
 - No GPU compute / WebGL terrain  

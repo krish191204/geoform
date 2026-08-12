@@ -1,10 +1,9 @@
 node_modules/
 dist/
-vendor/worldengine/.venv/
+vendor/
+vendor-skills/
 *.world
 .DS_Store
 __pycache__/
 *.pyc
 .python-version
-
-vendor/

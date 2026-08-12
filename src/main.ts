@@ -66,6 +66,9 @@ function renderShell() {
         <p>Powered by <a href="https://github.com/Mindwerks/worldengine" target="_blank" rel="noreferrer">WorldEngine</a> — plate tectonics, erosion, rain shadows, Holdridge biomes. Raise a ridge and climate recomputes.</p>
       </div>
       <div class="seed-row">
+        <a class="chip-link" href="/labs.html">Geography labs</a>
+        <a class="chip-link" href="/critique.html">Map critique</a>
+        <a class="chip-link" href="/roadmap.html">Accuracy roadmap</a>
         <label for="seed">Seed</label>
         <input id="seed" type="number" value="${seed}" />
         <button type="button" id="regen" class="primary">New world</button>
