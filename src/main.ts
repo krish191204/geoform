@@ -31,7 +31,7 @@ let busy = false
 let recomputeTimer: number | null = null
 let recomputeGeneration = 0
 let autosaveTimer: number | null = null
-let engineChoice: EngineChoice = 'auto'
+let engineChoice: EngineChoice = 'local'
 const renderer = new MapRenderer()
 let raf = 0
 
@@ -242,28 +242,24 @@ async function loadWorld(nextSeed: number) {
     return
   }
 
-  const preferLocalFallback = engineChoice === 'auto'
   setBusy(true, 'Running WorldEngine plate tectonics… (~few seconds)')
   status = 'Generating world with Mindwerks WorldEngine…'
   document.querySelector('#status')!.textContent = status
   try {
-    if (!(await apiHealthy())) throw new Error('Bad Gateway')
+    if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     clearAutosave()
     applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates · Holdridge biomes`)
     hideApiDown()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    if (preferLocalFallback) {
-      loadLocalWorld(nextSeed, `WorldEngine unavailable (${msg}) — fell back to local engine.`)
-      return
-    }
-    status = `WorldEngine error: ${msg}`
-    document.querySelector('#status')!.textContent = status
-    showApiDown(
-      msg.includes('Gateway') || msg.includes('Failed to fetch')
-        ? 'Vite is up, but nothing is listening on the WorldEngine port (:8765).'
-        : msg,
+    // Never leave the user on a blank map — always fall back to browser local.
+    engineChoice = 'local'
+    const sel = document.querySelector<HTMLSelectElement>('#engine')
+    if (sel) sel.value = 'local'
+    loadLocalWorld(
+      nextSeed,
+      `WorldEngine unavailable (${msg}) — switched to local browser engine. New world ready.`,
     )
   } finally {
     setBusy(false)

@@ -46,7 +46,7 @@ npm run dev:api           # terminal 1
 npm run dev               # terminal 2 → http://127.0.0.1:5173
 ```
 
-**If the map is a blank teal box with “Bad Gateway”:** Vite is running but WorldEngine is not. The UI cannot generate or recompute without `npm run dev:api`.
+**If the map is blank / “Bad Gateway”:** an old build expected WorldEngine. Current default is **Local (browser)** — just `npm run dev` and hit New world. Optional: `npm run setup:api && npm run dev:api` for WorldEngine.
 
 There is **no cloud account / cloud sync** for worlds. Autosave is `localStorage` in the current browser only; use Export/Import JSON to move maps between machines.
 
