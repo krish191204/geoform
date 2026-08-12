@@ -2,6 +2,7 @@ node_modules/
 dist/
 vendor/
 vendor-skills/
+.cursor/
 *.world
 .DS_Store
 __pycache__/
