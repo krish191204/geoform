@@ -354,6 +354,30 @@ button.primary:hover {
   color: inherit;
 }
 
+.advanced {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(28, 34, 28, 0.1);
+  font-size: 0.9rem;
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-soft, #3d4a44);
+}
+
+.advanced select {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+  font: inherit;
+  border-radius: 10px;
+  border: 1px solid rgba(28, 34, 28, 0.14);
+  background: rgba(255, 255, 255, 0.55);
+  padding: 0.45rem 0.65rem;
+}
+
 .brand a {
   color: var(--copper);
 }

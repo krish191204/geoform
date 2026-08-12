@@ -15,8 +15,8 @@ import type { Layer, Tool, World } from './world/types'
 const WIDTH = 320
 const HEIGHT = 160
 
-/** Prefer WorldEngine when available; always allow pure-browser local sim. */
-type EngineChoice = 'auto' | 'local' | 'worldengine'
+/** Local browser sim is the default. WorldEngine is an optional Python backend. */
+type EngineChoice = 'local' | 'worldengine'
 
 let seed = (Math.random() * 1e9) | 0
 let world: World | null = null
@@ -67,7 +67,7 @@ function renderShell() {
     <header class="topbar">
       <div class="brand">
         <h1>Geoform</h1>
-        <p>Powered by <a href="https://github.com/Mindwerks/worldengine" target="_blank" rel="noreferrer">WorldEngine</a> — plate tectonics, erosion, rain shadows, Holdridge biomes. Raise a ridge and climate recomputes.</p>
+        <p>Geography-aware worldbuilding in the browser — plates, rain shadows, biomes, settlement. Raise a ridge and climate recomputes.</p>
       </div>
       <div class="seed-row">
         <a class="chip-link" href="/labs.html">Geography labs</a>
@@ -75,12 +75,6 @@ function renderShell() {
         <a class="chip-link" href="/roadmap.html">Accuracy roadmap</a>
         <label for="seed">Seed</label>
         <input id="seed" type="number" value="${seed}" />
-        <label for="engine">Engine</label>
-        <select id="engine" title="WorldEngine needs Python API; Local runs entirely in the browser">
-          <option value="auto" ${engineChoice === 'auto' ? 'selected' : ''}>Auto</option>
-          <option value="local" ${engineChoice === 'local' ? 'selected' : ''}>Local (browser)</option>
-          <option value="worldengine" ${engineChoice === 'worldengine' ? 'selected' : ''}>WorldEngine</option>
-        </select>
         <button type="button" id="regen" class="primary">New world</button>
         <button type="button" id="randomize">Random seed</button>
         <button type="button" id="export">Export JSON</button>
@@ -102,15 +96,23 @@ function renderShell() {
           <input id="strength" type="range" min="1" max="12" value="${Math.round(strength * 100)}" />
         </div>
         <p class="hint">
-          <strong>Local</strong> = works with just <code>npm run dev</code> (browser sim).
-          <strong>WorldEngine</strong> = better plates/climate via Python API.
-          Autosave is this browser only — no cloud.
+          Runs entirely in this browser. Autosave stays here (no cloud).
+          Export JSON to keep a copy. Optional Python backend is advanced-only.
         </p>
+        <details class="advanced">
+          <summary>Advanced engine</summary>
+          <label for="engine">Backend</label>
+          <select id="engine" title="Local is default. WorldEngine needs a separate Python process.">
+            <option value="local" ${engineChoice === 'local' ? 'selected' : ''}>Local (browser) — default</option>
+            <option value="worldengine" ${engineChoice === 'worldengine' ? 'selected' : ''}>WorldEngine (Python API)</option>
+          </select>
+          <p class="hint">WorldEngine is optional. Leave this on Local unless you ran <code>npm run dev:api</code>.</p>
+        </details>
       </aside>
       <section class="map-shell">
         <canvas id="map"></canvas>
         <div class="map-overlay" id="layers"></div>
-        <div class="loading" id="loading">Generating with WorldEngine…</div>
+        <div class="loading" id="loading">Generating world…</div>
         <div class="api-banner" id="apiBanner" hidden></div>
       </section>
       <aside class="panel inspector">
@@ -138,32 +140,6 @@ async function apiHealthy(): Promise<boolean> {
   }
 }
 
-function showApiDown(detail: string) {
-  const banner = document.querySelector<HTMLDivElement>('#apiBanner')
-  if (!banner) return
-  banner.hidden = false
-  banner.innerHTML = `
-    <strong>WorldEngine API is offline</strong>
-    <p>${detail}</p>
-    <p>Use the <strong>browser local engine</strong> instead — no Python required — or start the API:</p>
-    <pre>npm run setup:api && npm run dev:api</pre>
-    <div class="banner-actions">
-      <button type="button" class="chip primary-chip" id="useLocal">Use local engine</button>
-      <button type="button" class="chip" id="retryApi">Retry WorldEngine</button>
-    </div>
-  `
-  banner.querySelector('#useLocal')?.addEventListener('click', () => {
-    engineChoice = 'local'
-    const sel = document.querySelector<HTMLSelectElement>('#engine')
-    if (sel) sel.value = 'local'
-    hideApiDown()
-    void loadWorld(seed)
-  })
-  banner.querySelector('#retryApi')?.addEventListener('click', () => {
-    void boot()
-  })
-}
-
 function hideApiDown() {
   const banner = document.querySelector<HTMLDivElement>('#apiBanner')
   if (banner) {
@@ -173,16 +149,15 @@ function hideApiDown() {
 }
 
 function loadLocalWorld(nextSeed: number, note?: string) {
-  setBusy(true, 'Generating local world in the browser…')
-  status = 'Generating with browser local engine…'
+  setBusy(true, 'Generating world…')
+  status = 'Generating local world…'
   document.querySelector('#status')!.textContent = status
   try {
     const next = generateWorld(WIDTH, HEIGHT, nextSeed)
     clearAutosave()
     applyWorld(
       next,
-      note ??
-        `Local engine seed ${next.seed} · ${next.plateCount} plates · instant climate (no Python)`,
+      note ?? `Seed ${next.seed} · ${next.plateCount} plates · rain shadows & biomes (browser)`,
     )
     hideApiDown()
   } finally {
@@ -192,36 +167,22 @@ function loadLocalWorld(nextSeed: number, note?: string) {
 
 async function boot() {
   hideApiDown()
+  engineChoice = 'local'
+  const sel = document.querySelector<HTMLSelectElement>('#engine')
+  if (sel) sel.value = 'local'
 
   const saved = loadAutosave()
   if (saved) {
     applyWorld(
       saved,
-      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities, ${saved.engine}). Generate a new world to discard.`,
+      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities). Generate a new world to discard.`,
     )
     const el = document.querySelector('#saveMeta')
     if (el) el.textContent = 'Restored from browser autosave'
     return
   }
 
-  const healthy = await apiHealthy()
-  if (engineChoice === 'local' || (engineChoice === 'auto' && !healthy)) {
-    if (engineChoice === 'auto' && !healthy) {
-      status = 'WorldEngine offline — using browser local engine.'
-      document.querySelector('#status')!.textContent = status
-    }
-    loadLocalWorld(seed)
-    return
-  }
-
-  if (!healthy) {
-    status = 'WorldEngine API offline.'
-    document.querySelector('#status')!.textContent = status
-    showApiDown('Nothing answered on :8765. You can still sculpt worlds with the local engine.')
-    return
-  }
-
-  await loadWorld(seed)
+  loadLocalWorld(seed)
 }
 
 function setBusy(on: boolean, message?: string) {
@@ -237,30 +198,26 @@ function setBusy(on: boolean, message?: string) {
 }
 
 async function loadWorld(nextSeed: number) {
-  if (engineChoice === 'local') {
+  if (engineChoice !== 'worldengine') {
     loadLocalWorld(nextSeed)
     return
   }
 
-  setBusy(true, 'Running WorldEngine plate tectonics… (~few seconds)')
-  status = 'Generating world with Mindwerks WorldEngine…'
+  setBusy(true, 'Contacting optional WorldEngine API…')
+  status = 'Trying WorldEngine…'
   document.querySelector('#status')!.textContent = status
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     clearAutosave()
-    applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates · Holdridge biomes`)
+    applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates`)
     hideApiDown()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    // Never leave the user on a blank map — always fall back to browser local.
     engineChoice = 'local'
     const sel = document.querySelector<HTMLSelectElement>('#engine')
     if (sel) sel.value = 'local'
-    loadLocalWorld(
-      nextSeed,
-      `WorldEngine unavailable (${msg}) — switched to local browser engine. New world ready.`,
-    )
+    loadLocalWorld(nextSeed, `Python backend unavailable (${msg}) — using local engine instead.`)
   } finally {
     setBusy(false)
   }
@@ -274,27 +231,29 @@ function scheduleClimateRecompute() {
     void (async () => {
       if (!world || gen !== recomputeGeneration) return
 
-      if (world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())) {
+      const useLocal =
+        world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
+      if (useLocal) {
         recomputeDerived(world)
         renderer.invalidate()
         scheduleAutosave()
-        status = 'Local climate updated (rain shadow, rivers, biomes).'
+        status = 'Climate updated (rain shadow, rivers, biomes).'
         document.querySelector('#status')!.textContent = status
         updateInspector()
         return
       }
 
-      status = 'WorldEngine recomputing climate from edited terrain…'
+      status = 'Recomputing climate…'
       document.querySelector('#status')!.textContent = status
       try {
         const next = await recomputeWorldEngine(world)
         if (gen !== recomputeGeneration) return
-        applyWorld(next, 'WorldEngine climate updated (precipitation, humidity, biomes, rivers).')
+        applyWorld(next, 'Climate updated.')
       } catch (err) {
         recomputeDerived(world)
         renderer.invalidate()
         scheduleAutosave()
-        status = `WorldEngine recompute failed — used local climate instead (${err instanceof Error ? err.message : String(err)})`
+        status = `Backend recompute failed — used local climate (${err instanceof Error ? err.message : String(err)})`
         document.querySelector('#status')!.textContent = status
         updateInspector()
       }
@@ -351,7 +310,7 @@ function bind() {
     })
   })
 
-  document.querySelector('#engine')!.addEventListener('change', (e) => {
+  document.querySelector('#engine')?.addEventListener('change', (e) => {
     engineChoice = (e.target as HTMLSelectElement).value as EngineChoice
   })
 
