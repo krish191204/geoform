@@ -30,6 +30,14 @@ There is **no database**. Runtime state is in-memory typed arrays. Persistence i
 ## Setup / run
 
 ```bash
+npm run setup:api          # clones vendor/worldengine + creates .venv (gitignored)
+npm run dev:api            # terminal 1 → :8765
+npm run dev                # terminal 2 → http://127.0.0.1:5173
+```
+
+Or manually:
+
+```bash
 cd vendor/worldengine && python3 -m venv .venv && source .venv/bin/activate
 pip install -e .          # worldengine + PyPlatec, numpy, noise, protobuf, …
 cd ../.. && npm install
@@ -38,7 +46,9 @@ npm run dev:api           # terminal 1
 npm run dev               # terminal 2 → http://127.0.0.1:5173
 ```
 
-Default generation size from the UI: **320 × 160** cells, **10 plates**. Full plate sim is O(seconds); climate-only recompute is ~1s at that resolution.
+**If the map is a blank teal box with “Bad Gateway”:** Vite is running but WorldEngine is not. The UI cannot generate or recompute without `npm run dev:api`.
+
+There is **no cloud account / cloud sync** for worlds. Autosave is `localStorage` in the current browser only; use Export/Import JSON to move maps between machines.
 
 ---
 

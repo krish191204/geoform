@@ -91,12 +91,13 @@ function renderShell() {
           <label>Raise / lower strength</label>
           <input id="strength" type="range" min="1" max="12" value="${Math.round(strength * 100)}" />
         </div>
-        <p class="hint">Progress autosaves in this browser. Use <strong>Export JSON</strong> for a backup file you can keep or share. Import restores it later.</p>
+        <p class="hint">Autosave is <strong>this browser only</strong> (no cloud sync). Use <strong>Export JSON</strong> for a file you can keep or share.</p>
       </aside>
       <section class="map-shell">
         <canvas id="map"></canvas>
         <div class="map-overlay" id="layers"></div>
         <div class="loading" id="loading">Generating with WorldEngine…</div>
+        <div class="api-banner" id="apiBanner" hidden></div>
       </section>
       <aside class="panel inspector">
         <h2>Inspector</h2>
@@ -112,7 +113,54 @@ function renderShell() {
   void boot()
 }
 
+async function apiHealthy(): Promise<boolean> {
+  try {
+    const res = await fetch('/health', { cache: 'no-store' })
+    if (!res.ok) return false
+    const body = (await res.json()) as { ok?: boolean }
+    return body.ok === true
+  } catch {
+    return false
+  }
+}
+
+function showApiDown(detail: string) {
+  const banner = document.querySelector<HTMLDivElement>('#apiBanner')
+  if (!banner) return
+  banner.hidden = false
+  banner.innerHTML = `
+    <strong>WorldEngine API is offline</strong>
+    <p>${detail}</p>
+    <p>In the project folder run <code>npm run setup:api</code> once, then keep both processes up:</p>
+    <pre>npm run dev:api
+npm run dev</pre>
+    <button type="button" class="chip" id="retryApi">Retry connection</button>
+  `
+  banner.querySelector('#retryApi')?.addEventListener('click', () => {
+    void boot()
+  })
+}
+
+function hideApiDown() {
+  const banner = document.querySelector<HTMLDivElement>('#apiBanner')
+  if (banner) {
+    banner.hidden = true
+    banner.innerHTML = ''
+  }
+}
+
 async function boot() {
+  hideApiDown()
+  if (!(await apiHealthy())) {
+    status =
+      'WorldEngine API offline — map needs npm run dev:api on :8765 (Vite alone cannot generate worlds).'
+    document.querySelector('#status')!.textContent = status
+    showApiDown(
+      'The blank map is not a broken brush — the Python backend never answered. There is no cloud world store either; saves stay in this browser after a world exists.',
+    )
+    return
+  }
+
   const saved = loadAutosave()
   if (saved) {
     applyWorld(
@@ -147,8 +195,14 @@ async function loadWorld(nextSeed: number) {
     clearAutosave()
     applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates · Holdridge biomes`)
   } catch (err) {
-    status = `WorldEngine error: ${err instanceof Error ? err.message : String(err)}. Is the API running?`
+    const msg = err instanceof Error ? err.message : String(err)
+    status = `WorldEngine error: ${msg}`
     document.querySelector('#status')!.textContent = status
+    showApiDown(
+      msg.includes('Gateway') || msg.includes('Failed to fetch')
+        ? 'Vite is up, but nothing is listening on the WorldEngine port (:8765).'
+        : msg,
+    )
   } finally {
     setBusy(false)
   }

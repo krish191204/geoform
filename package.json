@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:api": "vendor/worldengine/.venv/bin/python server/worldengine_api.py",
     "dev:all": "npm run dev:api & npm run dev",
+    "setup:api": "bash scripts/setup-worldengine.sh",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "fixtures:critique": "vite-node scripts/generate-critique-fixtures.mts",
