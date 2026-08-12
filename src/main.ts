@@ -1,6 +1,6 @@
 import './style.css'
-import { evaluateSuitability, recomputeSuitability } from './world/climate'
-import { nextCityName, paintElevation } from './world/generate'
+import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
+import { generateWorld, nextCityName, paintElevation } from './world/generate'
 import {
   autosaveWorld,
   clearAutosave,
@@ -15,6 +15,9 @@ import type { Layer, Tool, World } from './world/types'
 const WIDTH = 320
 const HEIGHT = 160
 
+/** Local browser sim is the default. WorldEngine is an optional Python backend. */
+type EngineChoice = 'local' | 'worldengine'
+
 let seed = (Math.random() * 1e9) | 0
 let world: World | null = null
 let layer: Layer = 'relief'
@@ -28,6 +31,7 @@ let busy = false
 let recomputeTimer: number | null = null
 let recomputeGeneration = 0
 let autosaveTimer: number | null = null
+let engineChoice: EngineChoice = 'local'
 const renderer = new MapRenderer()
 let raf = 0
 
@@ -63,9 +67,12 @@ function renderShell() {
     <header class="topbar">
       <div class="brand">
         <h1>Geoform</h1>
-        <p>Powered by <a href="https://github.com/Mindwerks/worldengine" target="_blank" rel="noreferrer">WorldEngine</a> — plate tectonics, erosion, rain shadows, Holdridge biomes. Raise a ridge and climate recomputes.</p>
+        <p>Geography-aware worldbuilding in the browser — plates, rain shadows, biomes, settlement. Raise a ridge and climate recomputes.</p>
       </div>
       <div class="seed-row">
+        <a class="chip-link" href="/labs.html">Geography labs</a>
+        <a class="chip-link" href="/critique.html">Map critique</a>
+        <a class="chip-link" href="/roadmap.html">Accuracy roadmap</a>
         <label for="seed">Seed</label>
         <input id="seed" type="number" value="${seed}" />
         <button type="button" id="regen" class="primary">New world</button>
@@ -88,12 +95,25 @@ function renderShell() {
           <label>Raise / lower strength</label>
           <input id="strength" type="range" min="1" max="12" value="${Math.round(strength * 100)}" />
         </div>
-        <p class="hint">Progress autosaves in this browser. Use <strong>Export JSON</strong> for a backup file you can keep or share. Import restores it later.</p>
+        <p class="hint">
+          Runs entirely in this browser. Autosave stays here (no cloud).
+          Export JSON to keep a copy. Optional Python backend is advanced-only.
+        </p>
+        <details class="advanced">
+          <summary>Advanced engine</summary>
+          <label for="engine">Backend</label>
+          <select id="engine" title="Local is default. WorldEngine needs a separate Python process.">
+            <option value="local" ${engineChoice === 'local' ? 'selected' : ''}>Local (browser) — default</option>
+            <option value="worldengine" ${engineChoice === 'worldengine' ? 'selected' : ''}>WorldEngine (Python API)</option>
+          </select>
+          <p class="hint">WorldEngine is optional. Leave this on Local unless you ran <code>npm run dev:api</code>.</p>
+        </details>
       </aside>
       <section class="map-shell">
         <canvas id="map"></canvas>
         <div class="map-overlay" id="layers"></div>
-        <div class="loading" id="loading">Generating with WorldEngine…</div>
+        <div class="loading" id="loading">Generating world…</div>
+        <div class="api-banner" id="apiBanner" hidden></div>
       </section>
       <aside class="panel inspector">
         <h2>Inspector</h2>
@@ -109,7 +129,48 @@ function renderShell() {
   void boot()
 }
 
+async function apiHealthy(): Promise<boolean> {
+  try {
+    const res = await fetch('/health', { cache: 'no-store' })
+    if (!res.ok) return false
+    const body = (await res.json()) as { ok?: boolean }
+    return body.ok === true
+  } catch {
+    return false
+  }
+}
+
+function hideApiDown() {
+  const banner = document.querySelector<HTMLDivElement>('#apiBanner')
+  if (banner) {
+    banner.hidden = true
+    banner.innerHTML = ''
+  }
+}
+
+function loadLocalWorld(nextSeed: number, note?: string) {
+  setBusy(true, 'Generating world…')
+  status = 'Generating local world…'
+  document.querySelector('#status')!.textContent = status
+  try {
+    const next = generateWorld(WIDTH, HEIGHT, nextSeed)
+    clearAutosave()
+    applyWorld(
+      next,
+      note ?? `Seed ${next.seed} · ${next.plateCount} plates · rain shadows & biomes (browser)`,
+    )
+    hideApiDown()
+  } finally {
+    setBusy(false)
+  }
+}
+
 async function boot() {
+  hideApiDown()
+  engineChoice = 'local'
+  const sel = document.querySelector<HTMLSelectElement>('#engine')
+  if (sel) sel.value = 'local'
+
   const saved = loadAutosave()
   if (saved) {
     applyWorld(
@@ -120,7 +181,8 @@ async function boot() {
     if (el) el.textContent = 'Restored from browser autosave'
     return
   }
-  await loadWorld(seed)
+
+  loadLocalWorld(seed)
 }
 
 function setBusy(on: boolean, message?: string) {
@@ -136,38 +198,65 @@ function setBusy(on: boolean, message?: string) {
 }
 
 async function loadWorld(nextSeed: number) {
-  setBusy(true, 'Running WorldEngine plate tectonics… (higher-res map, ~8s)')
-  status = 'Generating world with Mindwerks WorldEngine…'
+  if (engineChoice !== 'worldengine') {
+    loadLocalWorld(nextSeed)
+    return
+  }
+
+  setBusy(true, 'Contacting optional WorldEngine API…')
+  status = 'Trying WorldEngine…'
   document.querySelector('#status')!.textContent = status
   try {
+    if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     clearAutosave()
-    applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates · Holdridge biomes`)
+    applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates`)
+    hideApiDown()
   } catch (err) {
-    status = `WorldEngine error: ${err instanceof Error ? err.message : String(err)}. Is the API running?`
-    document.querySelector('#status')!.textContent = status
+    const msg = err instanceof Error ? err.message : String(err)
+    engineChoice = 'local'
+    const sel = document.querySelector<HTMLSelectElement>('#engine')
+    if (sel) sel.value = 'local'
+    loadLocalWorld(nextSeed, `Python backend unavailable (${msg}) — using local engine instead.`)
   } finally {
     setBusy(false)
   }
 }
 
-function scheduleWorldEngineRecompute() {
+function scheduleClimateRecompute() {
   if (!world) return
   if (recomputeTimer !== null) window.clearTimeout(recomputeTimer)
   const gen = ++recomputeGeneration
   recomputeTimer = window.setTimeout(() => {
     void (async () => {
       if (!world || gen !== recomputeGeneration) return
-      status = 'WorldEngine recomputing climate from edited terrain…'
+
+      const useLocal =
+        world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
+      if (useLocal) {
+        recomputeDerived(world)
+        renderer.invalidate()
+        scheduleAutosave()
+        status = 'Climate updated (rain shadow, rivers, biomes).'
+        document.querySelector('#status')!.textContent = status
+        updateInspector()
+        return
+      }
+
+      status = 'Recomputing climate…'
       document.querySelector('#status')!.textContent = status
       try {
         const next = await recomputeWorldEngine(world)
         if (gen !== recomputeGeneration) return
-        applyWorld(next, 'WorldEngine climate updated (precipitation, humidity, biomes, rivers).')
+        applyWorld(next, 'Climate updated.')
       } catch (err) {
-        status = `Recompute failed: ${err instanceof Error ? err.message : String(err)}`
+        recomputeDerived(world)
+        renderer.invalidate()
+        scheduleAutosave()
+        status = `Backend recompute failed — used local climate (${err instanceof Error ? err.message : String(err)})`
+        document.querySelector('#status')!.textContent = status
+        updateInspector()
       }
-      document.querySelector('#status')!.textContent = status
     })()
   }, 650)
 }
@@ -175,7 +264,7 @@ function scheduleWorldEngineRecompute() {
 function bind() {
   const tools = document.querySelector('#tools')!
   const toolDefs: { id: Tool; label: string; desc: string }[] = [
-    { id: 'raise', label: 'Raise', desc: 'Uplift — WorldEngine refreshes climate' },
+    { id: 'raise', label: 'Raise', desc: 'Uplift — climate recomputes' },
     { id: 'lower', label: 'Lower', desc: 'Erode or sink terrain' },
     { id: 'city', label: 'Found city', desc: 'Only where geography allows' },
     { id: 'inspect', label: 'Inspect', desc: 'Read elevation, climate, score' },
@@ -219,6 +308,10 @@ function bind() {
       btn.classList.add('active')
       // paint loop will redraw
     })
+  })
+
+  document.querySelector('#engine')?.addEventListener('change', (e) => {
+    engineChoice = (e.target as HTMLSelectElement).value as EngineChoice
   })
 
   document.querySelector('#brush')!.addEventListener('input', (e) => {
@@ -286,10 +379,13 @@ function bind() {
       paintElevation(world, cell.x, cell.y, brush, tool === 'raise' ? strength : -strength)
       renderer.invalidate()
       scheduleAutosave()
-      status = 'Terrain edited — waiting to recompute with WorldEngine…'
+      status =
+        world.engine === 'local'
+          ? 'Terrain edited — local climate will refresh…'
+          : 'Terrain edited — waiting to recompute climate…'
       updateInspector()
       document.querySelector('#status')!.textContent = status
-      scheduleWorldEngineRecompute()
+      scheduleClimateRecompute()
       return
     }
 

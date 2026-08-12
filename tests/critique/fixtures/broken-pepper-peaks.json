@@ -1,0 +1,15 @@
+{
+  "id": "broken-pepper-peaks",
+  "description": "Synthetic: isolated pinnacles instead of mountain belts",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [
+    {
+      "kind": "tectonic",
+      "titleIncludes": "Pepper"
+    }
+  ],
+  "score": {
+    "max": 95
+  }
+}

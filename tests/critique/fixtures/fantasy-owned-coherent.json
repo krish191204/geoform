@@ -1,0 +1,15 @@
+{
+  "id": "fantasy-owned-coherent",
+  "description": "Self-drawn coherent fantasy continent",
+  "corpus": "fantasy-owned",
+  "mode": "painted",
+  "mustFind": [],
+  "mustNotFind": [
+    {
+      "titleIncludes": "Desert kisses jungle"
+    }
+  ],
+  "score": {
+    "min": 40
+  }
+}

@@ -1,6 +1,16 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        roadmap: 'roadmap.html',
+        labs: 'labs.html',
+        critique: 'critique.html',
+      },
+    },
+  },
   server: {
     host: '127.0.0.1',
     port: 5173,

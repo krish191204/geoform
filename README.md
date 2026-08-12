@@ -30,6 +30,14 @@ There is **no database**. Runtime state is in-memory typed arrays. Persistence i
 ## Setup / run
 
 ```bash
+npm run setup:api          # clones vendor/worldengine + creates .venv (gitignored)
+npm run dev:api            # terminal 1 → :8765
+npm run dev                # terminal 2 → http://127.0.0.1:5173
+```
+
+Or manually:
+
+```bash
 cd vendor/worldengine && python3 -m venv .venv && source .venv/bin/activate
 pip install -e .          # worldengine + PyPlatec, numpy, noise, protobuf, …
 cd ../.. && npm install
@@ -38,7 +46,9 @@ npm run dev:api           # terminal 1
 npm run dev               # terminal 2 → http://127.0.0.1:5173
 ```
 
-Default generation size from the UI: **320 × 160** cells, **10 plates**. Full plate sim is O(seconds); climate-only recompute is ~1s at that resolution.
+**If the map is blank / “Bad Gateway”:** an old build expected WorldEngine. Current default is **Local (browser)** — just `npm run dev` and hit New world. Optional: `npm run setup:api && npm run dev:api` for WorldEngine.
+
+There is **no cloud account / cloud sync** for worlds. Autosave is `localStorage` in the current browser only; use Export/Import JSON to move maps between machines.
 
 ---
 
@@ -240,6 +250,20 @@ vendor/worldengine/         Upstream Mindwerks WorldEngine (editable install)
 Authoritative climate after sculpt always goes through the Python process; the TS climate path is preview-only and gets overwritten.
 
 ---
+
+## Accuracy roadmap (Earth-grounded next stage)
+
+Full requirements (datasets, math, skills, storage, phases):
+
+- Immersive interactive page: [http://127.0.0.1:5173/roadmap.html](http://127.0.0.1:5173/roadmap.html) (also linked from the map editor)
+- Geography labs (elevation, rivers, rain shadow, tectonics, settlement): [http://127.0.0.1:5173/labs.html](http://127.0.0.1:5173/labs.html)
+- Map critique (upload a map image, get a geography roast): [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html)
+- Training / test corpus policy: [`docs/TRAINING_AND_TESTS.md`](docs/TRAINING_AND_TESTS.md)
+- Report: [`docs/ACCURACY_ROADMAP.md`](docs/ACCURACY_ROADMAP.md)
+
+Critique regression: `npm run fixtures:critique && npm test`
+
+Tooling references cloned locally under `vendor-skills/` (gitignored): shadcn-ui MCP, anthropics/skills, ui-ux-pro-max, Convex agent-skills.
 
 ## What is explicitly not in the stack
 

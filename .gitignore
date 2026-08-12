@@ -1,10 +1,18 @@
 node_modules/
 dist/
-vendor/worldengine/.venv/
+vendor/
+vendor-skills/
+.cursor/
 *.world
 .DS_Store
 __pycache__/
 *.pyc
 .python-version
 
-vendor/
+# Track A raw downloads (keep folder .gitkeep via aoi:init)
+data/raw/**/*
+!data/raw/**/.gitkeep
+data/staging/**/*
+!data/staging/**/.gitkeep
+data/derived/**/*
+!data/derived/**/.gitkeep
