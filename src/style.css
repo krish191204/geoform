@@ -603,20 +603,53 @@ button.primary:hover {
 .city-list li {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
   font-size: 0.88rem;
-  padding: 0.4rem 0.35rem;
+  padding: 0.25rem 0.2rem;
   border-bottom: 1px solid rgba(28, 34, 28, 0.08);
 }
 
 .city-row {
-  cursor: pointer;
   border-radius: 8px;
-  transition: background 150ms ease;
 }
 
-.city-row:hover {
-  background: rgba(28, 34, 28, 0.06);
+.city-name {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 0.28rem 0.4rem;
+  font: inherit;
+  color: inherit;
+}
+
+.city-name:hover {
+  background: rgba(28, 34, 28, 0.05);
+}
+
+.city-name:focus {
+  outline: none;
+  border-color: rgba(28, 34, 28, 0.22);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.city-score {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  padding: 0.28rem 0.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.city-score:hover {
+  background: rgba(28, 34, 28, 0.08);
+  color: var(--ink);
 }
 
 .empty-city {

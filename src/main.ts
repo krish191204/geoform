@@ -919,6 +919,33 @@ function updateInspector() {
   `
 }
 
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+}
+
+function commitCityName(index: number, input: HTMLInputElement) {
+  if (!world) return
+  const city = world.cities[index]
+  if (!city) return
+  const original = input.dataset.original ?? city.name
+  const next = input.value.trim() || original
+  input.value = next
+  if (next === original) {
+    city.name = original
+    return
+  }
+  city.name = original
+  beginStroke(`Rename ${original}`)
+  strokeActive = false
+  city.name = next
+  updateHistoryButtons()
+  scheduleAutosave()
+  setStatus(`Renamed to ${next}`)
+}
+
 function updateCities() {
   const el = document.querySelector('#cities')
   if (!el) return
@@ -929,13 +956,43 @@ function updateCities() {
   el.innerHTML = world.cities
     .map(
       (c, i) =>
-        `<li class="city-row" data-city="${i}"><span>${c.name}</span><span>${(c.score * 100) | 0}%</span></li>`,
+        `<li class="city-row">
+          <input type="text" class="city-name" data-city="${i}" value="${escapeAttr(c.name)}" maxlength="40" spellcheck="false" aria-label="Rename ${escapeAttr(c.name)}" />
+          <button type="button" class="city-score" data-focus-city="${i}" title="Show on map">${(c.score * 100) | 0}%</button>
+        </li>`,
     )
     .join('')
-  el.querySelectorAll<HTMLElement>('[data-city]').forEach((row) => {
-    row.addEventListener('click', () => {
+
+  el.querySelectorAll<HTMLInputElement>('.city-name').forEach((input) => {
+    input.addEventListener('focus', () => {
+      input.dataset.original = input.value
+      input.select()
+    })
+    input.addEventListener('input', () => {
       if (!world) return
-      const c = world.cities[Number(row.dataset.city)]
+      const city = world.cities[Number(input.dataset.city)]
+      if (city) city.name = input.value
+    })
+    input.addEventListener('blur', () => {
+      commitCityName(Number(input.dataset.city), input)
+    })
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        input.blur()
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        input.value = input.dataset.original ?? input.value
+        input.blur()
+      }
+    })
+  })
+
+  el.querySelectorAll<HTMLButtonElement>('[data-focus-city]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (!world) return
+      const c = world.cities[Number(btn.dataset.focusCity)]
       if (!c) return
       hover = { x: c.x, y: c.y }
       focusCell(c.x, c.y)
