@@ -22,7 +22,9 @@ import {
 } from './world/tools'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { expandWorld, padsForZoomOut } from './world/expand'
+import { refreshGeography } from './world/geography'
 import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
+import { MAX_AGE_MA, reconstructPast } from './world/timeline'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { PlanetView } from './render/globe'
@@ -74,6 +76,9 @@ let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let spaceDown = false
 let climatePhase: 'idle' | 'painting' | 'updating' = 'idle'
 let pendingNewWorld: (() => void) | null = null
+let timelineAge = 0
+let timelineView: World | null = null
+let timelineTimer: number | null = null
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -102,11 +107,14 @@ function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
   landRatio = next.landRatio
+  timelineAge = 0
+  timelineView = null
   history.clear()
   resetView()
   const seedInput = document.querySelector<HTMLInputElement>('#seed')
   if (seedInput) seedInput.value = String(seed)
   syncLandRatioUi()
+  syncTimelineUi()
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')
@@ -219,15 +227,50 @@ function syncLandRatioUi() {
   if (waterEl) waterEl.textContent = String(100 - pct)
 }
 
+function displayWorld(): World | null {
+  if (timelineAge > 0.5 && timelineView) return timelineView
+  return world
+}
+
+function syncTimelineUi() {
+  const input = document.querySelector<HTMLInputElement>('#timeline')
+  if (input && document.activeElement !== input) input.value = String(Math.round(timelineAge))
+  const el = document.querySelector('#ageVal')
+  if (el) el.textContent = timelineAge < 0.5 ? 'Present' : `${Math.round(timelineAge)} Ma`
+}
+
+function setTimelineAge(age: number) {
+  timelineAge = Math.max(0, Math.min(MAX_AGE_MA, age))
+  syncTimelineUi()
+  if (!world || timelineAge < 0.5) {
+    timelineView = null
+    renderer.invalidate()
+    if (world) setStatus('Present — mountains, rivers, and climate follow the continents.')
+    return
+  }
+  timelineView = reconstructPast(world, timelineAge)
+  renderer.invalidate()
+  updateInspector()
+  setStatus(`${Math.round(timelineAge)} Ma — reconstructed from today’s plates.`)
+}
+
+function scheduleTimeline(age: number) {
+  timelineAge = Math.max(0, Math.min(MAX_AGE_MA, age))
+  syncTimelineUi()
+  if (timelineTimer !== null) window.clearTimeout(timelineTimer)
+  timelineTimer = window.setTimeout(() => setTimelineAge(timelineAge), 40)
+}
+
 function pickCell(clientX: number, clientY: number): { x: number; y: number } | null {
-  if (!world) return null
+  const src = displayWorld()
+  if (!src) return null
   if (viewMode === 'planet') {
     if (!planet) return null
-    return planet.pick(clientX, clientY, world)
+    return planet.pick(clientX, clientY, src)
   }
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return null
-  return screenToCell(canvas, clientX, clientY, world)
+  return screenToCell(canvas, clientX, clientY, src)
 }
 
 function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number } {
@@ -272,9 +315,12 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   viewPanX = 0
   viewPanY = 0
   applyViewTransform()
+  timelineAge = 0
+  timelineView = null
+  syncTimelineUi()
+  refreshGeography(world, { sculpt: true })
   renderer.invalidate()
-  setClimatePhase('updating')
-  scheduleClimateRecompute()
+  setClimatePhase('idle')
   updateCities()
   updateInspector()
   updateHistoryButtons()
@@ -337,7 +383,7 @@ function syncClimateHud() {
   el.hidden = false
   el.classList.toggle('busy', climatePhase === 'updating')
   el.textContent =
-    climatePhase === 'painting' ? 'Rivers update on release' : 'Updating climate'
+    climatePhase === 'painting' ? 'Climate follows the land' : 'Updating rivers & climate'
 }
 
 function setMapHint(on: boolean) {
@@ -434,6 +480,13 @@ function renderShell() {
           <input id="landRatio" type="range" min="12" max="72" value="${Math.round(landRatio * 100)}" />
         </div>
         <p class="hint">Flood or expose coasts. New worlds and zoom-out ocean follow this mix.</p>
+
+        <h3>Deep time</h3>
+        <div class="slider-row">
+          <label>Age · <span id="ageVal">Present</span></label>
+          <input id="timeline" type="range" min="0" max="200" value="0" />
+        </div>
+        <p class="hint">Pull back to see how today’s continents sat earlier — mountains and climate rebuild for that age.</p>
 
         <h3>Continents</h3>
         <div class="style-grid" id="continentStyles"></div>
@@ -601,10 +654,11 @@ function scheduleClimateRecompute(immediate = false) {
     const useLocal =
       world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
     if (useLocal) {
-      recomputeDerived(world)
+      refreshGeography(world, { sculpt: false })
+      if (timelineAge > 0.5) timelineView = reconstructPast(world, timelineAge)
       renderer.invalidate()
       scheduleAutosave()
-      setStatus('Climate updated — rain shadows, rivers, biomes.')
+      setStatus('Rivers and climate rebuilt from the land.')
       setClimatePhase('idle')
       updateInspector()
       return
@@ -632,7 +686,7 @@ function scheduleClimateRecompute(immediate = false) {
     }
   }
   if (immediate) void run()
-  else recomputeTimer = window.setTimeout(() => void run(), 420)
+  else recomputeTimer = window.setTimeout(() => void run(), 160)
 }
 
 function beginStroke(label: string) {
@@ -659,6 +713,9 @@ function updateHistoryButtons() {
 function doUndo() {
   if (!world || !history.canUndo()) return
   const label = history.undo(world)
+  timelineAge = 0
+  timelineView = null
+  syncTimelineUi()
   landRatio = world.landRatio
   syncLandRatioUi()
   recomputeDerived(world)
@@ -674,6 +731,9 @@ function doUndo() {
 function doRedo() {
   if (!world || !history.canRedo()) return
   const label = history.redo(world)
+  timelineAge = 0
+  timelineView = null
+  syncTimelineUi()
   landRatio = world.landRatio
   syncLandRatioUi()
   recomputeDerived(world)
@@ -793,6 +853,14 @@ function bind() {
     setStatus(`Land ${Math.round(landRatio * 100)}% · water ${Math.round((1 - landRatio) * 100)}%`)
   })
 
+  const timeInput = document.querySelector<HTMLInputElement>('#timeline')
+  timeInput?.addEventListener('input', (e) => {
+    scheduleTimeline(Number((e.target as HTMLInputElement).value))
+  })
+  timeInput?.addEventListener('change', (e) => {
+    setTimelineAge(Number((e.target as HTMLInputElement).value))
+  })
+
   document.querySelector('#undo')!.addEventListener('click', doUndo)
   document.querySelector('#redo')!.addEventListener('click', doRedo)
   document.querySelector('#resetView')!.addEventListener('click', () => {
@@ -800,8 +868,15 @@ function bind() {
     setStatus('View reset')
   })
   document.querySelector('#recomputeNow')!.addEventListener('click', () => {
+    if (!world) return
+    if (timelineAge > 0.5) setTimelineAge(0)
     setClimatePhase('updating')
-    scheduleClimateRecompute(true)
+    refreshGeography(world, { sculpt: true })
+    renderer.invalidate()
+    setClimatePhase('idle')
+    setStatus('Mountains, rivers, and climate rebuilt from the continents.')
+    updateInspector()
+    scheduleAutosave()
   })
   document.querySelector('#suggestCities')!.addEventListener('click', () => {
     if (!world) return
@@ -916,6 +991,7 @@ function bind() {
 
   const applyAt = (clientX: number, clientY: number, shiftKey: boolean) => {
     if (!world || busy) return
+    if (timelineAge > 0.5 && tool !== 'inspect') setTimelineAge(0)
     const cell = pickCell(clientX, clientY)
     if (!cell) return
     hover = cell
@@ -1201,13 +1277,14 @@ function rasterScale(w: World): number {
 }
 
 function paint() {
-  if (!world) return
+  const src = displayWorld()
+  if (!src) return
   if (viewMode === 'planet' && planet) {
     planet.layout()
     planet.sync(
-      world,
+      src,
       globeLook,
-      `${world.seed}|${world.width}x${world.height}|${world.elev[0]}|${world.elev[(world.elev.length / 2) | 0]}|${world.seaLevel}|${world.biome[(world.biome.length / 2) | 0]}|${world.cities.length}|${climatePhase}`,
+      `${src.seed}|${src.width}x${src.height}|${src.elev[0]}|${src.elev[(src.elev.length / 2) | 0]}|${src.seaLevel}|${src.biome[(src.biome.length / 2) | 0]}|${src.cities.length}|${climatePhase}|${Math.round(timelineAge)}`,
     )
     planet.render()
     return
@@ -1215,11 +1292,11 @@ function paint() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
   const ctx = canvas.getContext('2d')!
-  renderer.draw(ctx, world, {
+  renderer.draw(ctx, src, {
     layer,
     showRivers: true,
-    showCities: true,
-    scale: rasterScale(world),
+    showCities: timelineAge < 8,
+    scale: rasterScale(src),
     hover,
     brush,
     tool,
@@ -1231,15 +1308,17 @@ function paint() {
 function updateInspector() {
   const el = document.querySelector('#inspect')
   if (!el) return
-  if (!world || !hover) {
+  const src = displayWorld()
+  if (!src || !hover) {
     el.innerHTML = `<p class="hint">Hover the map. Switch to <strong>Settle</strong> layer to scout city sites.</p>`
     return
   }
   const { x, y } = hover
-  const i = y * world.width + x
-  const suit = evaluateSuitability(world, x, y)
-  const above = world.elev[i] >= world.seaLevel
-  const landPct = Math.round(landFraction(world.elev, world.seaLevel) * 100)
+  const i = y * src.width + x
+  if (i < 0 || i >= src.elev.length) return
+  const suit = evaluateSuitability(src, x, y)
+  const above = src.elev[i] >= src.seaLevel
+  const landPct = Math.round(landFraction(src.elev, src.seaLevel) * 100)
   el.innerHTML = `
     <div class="inspect-head">
       <strong>${x}, ${y}</strong>
@@ -1247,13 +1326,13 @@ function updateInspector() {
       <span class="pill score ${suit.ok ? 'ok' : 'no'}">${(suit.score * 100) | 0}%</span>
     </div>
     <dl>
-      <dt>Elevation</dt><dd>${(world.elev[i] * 100) | 0}%</dd>
+      <dt>Elevation</dt><dd>${(src.elev[i] * 100) | 0}%</dd>
       <dt>Land / water</dt><dd>${landPct}% · ${100 - landPct}%</dd>
-      <dt>Temperature</dt><dd>${(world.temp[i] * 100) | 0}%</dd>
-      <dt>Moisture</dt><dd>${(world.moist[i] * 100) | 0}%</dd>
-      <dt>River flux</dt><dd>${world.flux[i].toFixed(1)}</dd>
-      <dt>Biome</dt><dd>${world.biome[i]}</dd>
-      <dt>Plate</dt><dd>#${world.plateId[i]}</dd>
+      <dt>Temperature</dt><dd>${(src.temp[i] * 100) | 0}%</dd>
+      <dt>Moisture</dt><dd>${(src.moist[i] * 100) | 0}%</dd>
+      <dt>River flux</dt><dd>${src.flux[i].toFixed(1)}</dd>
+      <dt>Biome</dt><dd>${src.biome[i]}</dd>
+      <dt>Plate</dt><dd>#${src.plateId[i]}</dd>
     </dl>
     <ul class="reasons">
       ${suit.reasons.map((r) => `<li class="${suit.ok ? 'good' : 'bad'}">${r}</li>`).join('')}

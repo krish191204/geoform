@@ -1,11 +1,19 @@
 import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
+import { ensurePlateMotion } from './geography'
 import { landFraction } from './land'
 
 export function worldFromPayload(
   payload: WorldEnginePayload,
   keepCities: World['cities'] = [],
-  frame?: { originX: number; originY: number; latRows: number; landRatio?: number },
+  frame?: {
+    originX: number
+    originY: number
+    latRows: number
+    landRatio?: number
+    plateVx?: Float32Array
+    plateVy?: Float32Array
+  },
 ): World {
   const n = payload.width * payload.height
   const world: World = {
@@ -25,6 +33,8 @@ export function worldFromPayload(
       (c) => c.x >= 0 && c.y >= 0 && c.x < payload.width && c.y < payload.height,
     ),
     plateCount: payload.plateCount,
+    plateVx: frame?.plateVx ? new Float32Array(frame.plateVx) : new Float32Array(0),
+    plateVy: frame?.plateVy ? new Float32Array(frame.plateVy) : new Float32Array(0),
     rawElevMin: payload.rawElevMin,
     rawElevMax: payload.rawElevMax,
     rawSeaThreshold: payload.rawSeaThreshold,
@@ -34,6 +44,7 @@ export function worldFromPayload(
     latRows: frame?.latRows ?? payload.height,
   }
   world.landRatio = frame?.landRatio ?? landFraction(world.elev, world.seaLevel)
+  ensurePlateMotion(world)
   recomputeSuitability(world)
   return world
 }
@@ -83,5 +94,7 @@ export async function recomputeWorldEngine(world: World): Promise<World> {
     originY: world.originY,
     latRows: world.latRows,
     landRatio: world.landRatio,
+    plateVx: world.plateVx,
+    plateVy: world.plateVy,
   })
 }

@@ -5,6 +5,8 @@ export interface HistoryEntry {
   elev: Float32Array
   plateId: Int16Array
   plateCount: number
+  plateVx: Float32Array
+  plateVy: Float32Array
   cities: City[]
   width: number
   height: number
@@ -24,6 +26,8 @@ function snapshot(world: World, label: string): HistoryEntry {
     elev: cloneElev(world.elev),
     plateId: clonePlateId(world.plateId),
     plateCount: world.plateCount,
+    plateVx: new Float32Array(world.plateVx),
+    plateVy: new Float32Array(world.plateVy),
     cities: cloneCities(world.cities),
     width: world.width,
     height: world.height,
@@ -49,6 +53,8 @@ function restore(world: World, entry: HistoryEntry): void {
   world.elev = cloneElev(entry.elev)
   world.plateId = clonePlateId(entry.plateId)
   world.plateCount = entry.plateCount
+  world.plateVx = new Float32Array(entry.plateVx)
+  world.plateVy = new Float32Array(entry.plateVy)
   world.cities = cloneCities(entry.cities)
   ensureDerived(world)
 }

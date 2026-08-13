@@ -1,5 +1,6 @@
-import { fbm } from './noise'
 import { recomputeDerived } from './climate'
+import { ensurePlateMotion, sculptOrogeny } from './geography'
+import { fbm } from './noise'
 import type { World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -382,6 +383,8 @@ export function addContinent(
   smoothLocal(world, style === 'archipelago' ? 1 : 2)
 
   world.plateCount = newId + 1
+  ensurePlateMotion(world)
+  sculptOrogeny(world)
   world.cities = world.cities.filter((c) => {
     const i = idx(w, c.x, c.y)
     return i >= 0 && i < elev.length && elev[i] >= seaLevel

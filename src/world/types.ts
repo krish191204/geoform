@@ -53,6 +53,9 @@ export interface World {
   suitability: Float32Array
   cities: City[]
   plateCount: number
+  /** Plate velocity in cells per million years. */
+  plateVx: Float32Array
+  plateVy: Float32Array
   /** WorldEngine raw elevation calibration (for recompute) */
   rawElevMin: number
   rawElevMax: number

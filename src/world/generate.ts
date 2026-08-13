@@ -1,4 +1,5 @@
 import { recomputeDerived } from './climate'
+import { sculptOrogeny } from './geography'
 import { applyLandRatio, clampLandRatio, DEFAULT_LAND_RATIO } from './land'
 import { createRng, fbm } from './noise'
 import type { Biome, City, World } from './types'
@@ -225,6 +226,13 @@ export function generateWorld(
 
   applyNoisyOceanMargins(elev, width, height, seed)
 
+  const plateVx = new Float32Array(plateCount)
+  const plateVy = new Float32Array(plateCount)
+  for (let i = 0; i < plateCount; i++) {
+    plateVx[i] = plates[i].vx * 0.32
+    plateVy[i] = plates[i].vy * 0.32
+  }
+
   const seaLevel = 0.44
 
   const world: World = {
@@ -242,6 +250,8 @@ export function generateWorld(
     suitability: new Float32Array(width * height),
     cities: [] as City[],
     plateCount,
+    plateVx,
+    plateVy,
     rawElevMin: 0,
     rawElevMax: 1,
     rawSeaThreshold: seaLevel,
@@ -252,6 +262,7 @@ export function generateWorld(
   }
 
   applyLandRatio(world, land)
+  sculptOrogeny(world)
   recomputeDerived(world)
   return world
 }
