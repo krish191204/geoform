@@ -44,6 +44,8 @@ export interface World {
   seaLevel: number
   /** Target share of cells that should be land (the rest is water). */
   landRatio: number
+  /** How land should clump: full continents, mixed, or speckle islands. */
+  continentMass: 'continents' | 'mixed' | 'islands'
   plateId: Int16Array
   elev: Float32Array
   temp: Float32Array

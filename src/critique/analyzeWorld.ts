@@ -1,4 +1,5 @@
 import type { CritiqueResult, MapIssue, Severity } from './types'
+import { landmassStats } from '../world/mass'
 
 interface GridWorld {
   width: number
@@ -423,6 +424,36 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
         evidence: `${highIsolated}/${high} highs are isolated`,
       })
     }
+  }
+
+  const mass = landmassStats({
+    width: w,
+    height: h,
+    elev: elev instanceof Float32Array ? elev : Float32Array.from(elev),
+    seaLevel: sea,
+  })
+  if (mass.landCells > 80 && mass.speckleShare > 0.32) {
+    issues.push({
+      id: nextId(),
+      severity: 'major',
+      kind: 'tectonic',
+      title: 'Green pimples, not continents',
+      critique: `${Math.round(mass.speckleShare * 100)}% of the land is speckle islands. A planet can be an archipelago on purpose — otherwise that is blue ocean with acne, not geography.`,
+      fix: 'Use Full continents, paint larger masses, or own the island-world choice.',
+      confidence: 0.8,
+      evidence: `${mass.components} scraps, largest ${Math.round(mass.largestShare * 100)}% of land`,
+    })
+  }
+  if (mass.landCells > 40 && mass.axisAlignedCoastShare > 0.42) {
+    issues.push({
+      id: nextId(),
+      severity: 'major',
+      kind: 'visual',
+      title: 'Rectangular coasts',
+      critique: `${Math.round(mass.axisAlignedCoastShare * 100)}% of the shoreline is axis-aligned. Plates do not stamp a box in the middle of the sea.`,
+      fix: 'Break the walls with inlets and capes, or generate a new world.',
+      confidence: 0.78,
+    })
   }
 
   if (issues.length === 0) {

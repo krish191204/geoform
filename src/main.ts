@@ -25,6 +25,13 @@ import { expandWorld, padsForZoomOut } from './world/expand'
 import { chewStraightCoasts } from './world/coasts'
 import { refreshGeography } from './world/geography'
 import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
+import {
+  clampContinentMass,
+  CONTINENT_MASS_OPTIONS,
+  DEFAULT_CONTINENT_MASS,
+  type ContinentMass,
+} from './world/mass'
+import { flagImpossibleGeography } from './world/plausibility'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
@@ -49,6 +56,7 @@ const TERRAIN_TOOLS: Tool[] = [
 
 let seed = (Math.random() * 1e9) | 0
 let landRatio = DEFAULT_LAND_RATIO
+let continentMass: ContinentMass = DEFAULT_CONTINENT_MASS
 let world: World | null = null
 let layer: Layer = 'relief'
 let tool: Tool = 'raise'
@@ -108,6 +116,7 @@ function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
   landRatio = next.landRatio
+  continentMass = clampContinentMass(next.continentMass)
   timelineAge = 0
   timelineView = null
   history.clear()
@@ -115,11 +124,13 @@ function applyWorld(next: World, message: string) {
   const seedInput = document.querySelector<HTMLInputElement>('#seed')
   if (seedInput) seedInput.value = String(seed)
   syncLandRatioUi()
+  syncMassUi()
   syncTimelineUi()
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')
   updateInspector()
+  updateGeoFlags()
   updateCities()
   updateHistoryButtons()
   scheduleAutosave()
@@ -236,6 +247,30 @@ function renderLayerChips() {
       renderLayerChips()
     })
   })
+}
+
+function syncMassUi() {
+  const current = world?.continentMass ?? continentMass
+  document.querySelectorAll<HTMLButtonElement>('[data-mass]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mass === current)
+  })
+}
+
+function updateGeoFlags() {
+  const el = document.querySelector('#geoFlags')
+  if (!el) return
+  const src = displayWorld()
+  if (!src) {
+    el.innerHTML = ''
+    return
+  }
+  const flags = flagImpossibleGeography(src, continentMass)
+  el.innerHTML = flags
+    .map(
+      (f) =>
+        `<div class="geo-flag ${f.severity}"><strong>${escapeAttr(f.title)}</strong><span>${escapeAttr(f.detail)}</span></div>`,
+    )
+    .join('')
 }
 
 function syncLandRatioUi() {
@@ -519,6 +554,9 @@ function renderShell() {
           <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
           <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
         </div>
+        <h3>Landmass</h3>
+        <div class="style-grid" id="massStyles"></div>
+        <p class="hint">Full continents by default. Island world is the speckle look — only if you want it. New worlds follow this; paint still does what you do.</p>
         <div class="slider-row">
           <label>Land · <span id="landVal">${Math.round(landRatio * 100)}</span>% · Water · <span id="waterVal">${Math.round((1 - landRatio) * 100)}</span>%</label>
           <input id="landRatio" type="range" min="12" max="72" value="${Math.round(landRatio * 100)}" />
@@ -580,6 +618,7 @@ function renderShell() {
 
       <aside class="panel inspector">
         <h2>Inspector</h2>
+        <div id="geoFlags" class="geo-flags"></div>
         <div id="inspect"></div>
         <div class="status" id="status">${status}</div>
         <h3>Cities</h3>
@@ -615,7 +654,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
   setStatus('Generating local world…')
   try {
-    const next = generateWorld(WIDTH, HEIGHT, nextSeed, landRatio)
+    const next = generateWorld(WIDTH, HEIGHT, nextSeed, landRatio, continentMass)
     clearAutosave()
     applyWorld(
       next,
@@ -705,6 +744,7 @@ function scheduleClimateRecompute(immediate = false) {
       setStatus('Rivers and climate rebuilt from the land.')
       setClimatePhase('idle')
       updateInspector()
+      updateGeoFlags()
       return
     }
     setStatus('Recomputing climate…')
@@ -768,7 +808,9 @@ function doUndo() {
   timelineView = null
   syncTimelineUi()
   landRatio = world.landRatio
+  continentMass = clampContinentMass(world.continentMass)
   syncLandRatioUi()
+  syncMassUi()
   recomputeDerived(world)
   renderer.invalidate()
   updateCities()
@@ -786,7 +828,9 @@ function doRedo() {
   timelineView = null
   syncTimelineUi()
   landRatio = world.landRatio
+  continentMass = clampContinentMass(world.continentMass)
   syncLandRatioUi()
+  syncMassUi()
   recomputeDerived(world)
   renderer.invalidate()
   updateCities()
@@ -852,6 +896,32 @@ function bind() {
         styles.querySelectorAll('.style-chip').forEach((b) => b.classList.remove('active'))
         btn.classList.add('active')
         syncContinentHint()
+      })
+    })
+  }
+
+  const massBox = document.querySelector('#massStyles')
+  if (massBox) {
+    massBox.innerHTML = CONTINENT_MASS_OPTIONS.map(
+      (s) =>
+        `<button type="button" class="style-chip ${s.id === continentMass ? 'active' : ''}" data-mass="${s.id}" title="${s.desc}">
+          <span>${s.label}</span>
+          <small>${s.desc}</small>
+        </button>`,
+    ).join('')
+    massBox.querySelectorAll<HTMLButtonElement>('[data-mass]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        continentMass = clampContinentMass(btn.dataset.mass)
+        if (world) world.continentMass = continentMass
+        syncMassUi()
+        updateGeoFlags()
+        scheduleAutosave()
+        const opt = CONTINENT_MASS_OPTIONS.find((s) => s.id === continentMass)
+        setStatus(
+          continentMass === 'islands'
+            ? 'Island world — next New world will speckle. Paint still does what you do.'
+            : `${opt?.label ?? 'Full continents'} — next New world grows large landmasses.`,
+        )
       })
     })
   }
@@ -1366,6 +1436,7 @@ function paint() {
 }
 
 function updateInspector() {
+  updateGeoFlags()
   const el = document.querySelector('#inspect')
   if (!el) return
   const src = displayWorld()

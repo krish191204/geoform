@@ -558,6 +558,39 @@ button.primary:hover {
   color: var(--paper);
 }
 
+.geo-flags {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0 0 0.85rem;
+}
+
+.geo-flag {
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.geo-flag strong {
+  display: block;
+  margin-bottom: 0.12rem;
+  font-size: 0.86rem;
+}
+
+.geo-flag.impossible {
+  background: rgba(184, 90, 42, 0.18);
+  color: #6e2e12;
+}
+
+.geo-flag.unlikely {
+  background: rgba(184, 140, 42, 0.16);
+  color: #5a3a10;
+}
+
+.geo-flag.note {
+  background: rgba(28, 34, 28, 0.06);
+}
+
 .inspect-head {
   display: flex;
   align-items: center;

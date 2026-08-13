@@ -1,6 +1,7 @@
 import { classifyBiome } from './climate'
 import { chewStraightCoasts } from './coasts'
 import { clampLandRatio } from './land'
+import { clampContinentMass } from './mass'
 import { fbm } from './noise'
 import type { World } from './types'
 
@@ -79,6 +80,7 @@ function generatePadElev(
   seed: number,
   sea: number,
   land: number,
+  mass: ReturnType<typeof clampContinentMass> = 'continents',
 ): number {
   const n =
     fbm(gx / 48, gy / 48, seed, 5) * 0.55 + fbm(gx / 18, gy / 18, seed + 7, 3) * 0.25
@@ -86,8 +88,9 @@ function generatePadElev(
   let e = 0.08 + n * 0.12 + coast
   const blob = fbm(gx / 30, gy / 26, seed + 13, 5)
   const island = fbm(gx / 11, gy / 11, seed + 99, 4)
-  const continentThresh = 1.14 - land * 0.28
-  const islandThresh = 0.94 - land * 0.16
+  const continentThresh = mass === 'continents' ? 1.22 - land * 0.18 : 1.14 - land * 0.28
+  const islandThresh =
+    mass === 'islands' ? 0.82 - land * 0.2 : mass === 'mixed' ? 0.9 - land * 0.16 : 0.97 - land * 0.1
   if (blob > continentThresh) {
     const t = (blob - continentThresh) / Math.max(0.08, 1 - continentThresh)
     e = sea + 0.04 + t * 0.26 + n * 0.12
@@ -139,6 +142,7 @@ export function expandWorld(
   const seed = world.seed
   const latSpan = Math.max(1, world.latRows - 1)
   const land = clampLandRatio(world.landRatio)
+  const mass = clampContinentMass(world.continentMass)
   const short = Math.min(ow, oh)
   const warpAmp = Math.min(28, Math.max(4, short * 0.18))
   const copyDepth = -Math.min(22, Math.max(3, short * 0.14))
@@ -154,7 +158,7 @@ export function expandWorld(
       const warp = (fbm(gx / 11, gy / 9, seed + 21, 4) - 0.5) * warpAmp
       const sd = signedRectDist(ox, oy, ow, oh) + warp
       const inside = ox >= 0 && oy >= 0 && ox < ow && oy < oh
-      const gen = generatePadElev(gx, gy, seed, sea, land)
+      const gen = generatePadElev(gx, gy, seed, sea, land, mass)
       const edgePlate = oldPlate[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
 
       let e: number

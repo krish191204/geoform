@@ -15,6 +15,7 @@ export interface HistoryEntry {
   latRows: number
   seaLevel: number
   landRatio: number
+  continentMass: World['continentMass']
   rawSeaThreshold: number
   label: string
 }
@@ -36,6 +37,7 @@ function snapshot(world: World, label: string): HistoryEntry {
     latRows: world.latRows,
     seaLevel: world.seaLevel,
     landRatio: world.landRatio,
+    continentMass: world.continentMass,
     rawSeaThreshold: world.rawSeaThreshold,
     label,
   }
@@ -49,6 +51,7 @@ function restore(world: World, entry: HistoryEntry): void {
   world.latRows = entry.latRows
   world.seaLevel = entry.seaLevel
   world.landRatio = entry.landRatio
+  world.continentMass = entry.continentMass
   world.rawSeaThreshold = entry.rawSeaThreshold
   world.elev = cloneElev(entry.elev)
   world.plateId = clonePlateId(entry.plateId)

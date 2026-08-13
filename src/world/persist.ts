@@ -2,6 +2,7 @@ import type { World } from './types'
 import { recomputeSuitability } from './climate'
 import { ensurePlateMotion } from './geography'
 import { landFraction } from './land'
+import { clampContinentMass, DEFAULT_CONTINENT_MASS } from './mass'
 
 const STORAGE_KEY = 'geoform.autosave.v1'
 
@@ -28,6 +29,7 @@ export interface SavedWorld {
   originY?: number
   latRows?: number
   landRatio?: number
+  continentMass?: 'continents' | 'mixed' | 'islands'
   plateVx?: number[]
   plateVy?: number[]
 }
@@ -56,6 +58,7 @@ export function serializeWorld(world: World): SavedWorld {
     originY: world.originY,
     latRows: world.latRows,
     landRatio: world.landRatio,
+    continentMass: world.continentMass,
     plateVx: Array.from(world.plateVx),
     plateVy: Array.from(world.plateVy),
   }
@@ -88,10 +91,12 @@ export function deserializeWorld(data: SavedWorld): World {
     originY: data.originY ?? 0,
     latRows: data.latRows ?? data.height,
     landRatio: 0,
+    continentMass: DEFAULT_CONTINENT_MASS,
     plateVx: Float32Array.from(data.plateVx ?? []),
     plateVy: Float32Array.from(data.plateVy ?? []),
   }
   world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
+  world.continentMass = clampContinentMass(data.continentMass)
   ensurePlateMotion(world)
   recomputeSuitability(world)
   return world

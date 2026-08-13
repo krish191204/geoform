@@ -2,6 +2,7 @@ import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
 import { ensurePlateMotion } from './geography'
 import { landFraction } from './land'
+import { DEFAULT_CONTINENT_MASS } from './mass'
 
 export function worldFromPayload(
   payload: WorldEnginePayload,
@@ -42,6 +43,7 @@ export function worldFromPayload(
     originX: frame?.originX ?? 0,
     originY: frame?.originY ?? 0,
     latRows: frame?.latRows ?? payload.height,
+    continentMass: DEFAULT_CONTINENT_MASS,
   }
   world.landRatio = frame?.landRatio ?? landFraction(world.elev, world.seaLevel)
   ensurePlateMotion(world)
