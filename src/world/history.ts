@@ -1,15 +1,48 @@
 import type { City, World } from './types'
-import { cloneCities, cloneElev, clonePlateId } from './tools'
+import { cloneCities, cloneElev, clonePlateId, ensureDerived } from './tools'
 
 export interface HistoryEntry {
   elev: Float32Array
   plateId: Int16Array
   plateCount: number
   cities: City[]
+  width: number
+  height: number
+  originX: number
+  originY: number
+  latRows: number
   label: string
 }
 
 const MAX = 40
+
+function snapshot(world: World, label: string): HistoryEntry {
+  return {
+    elev: cloneElev(world.elev),
+    plateId: clonePlateId(world.plateId),
+    plateCount: world.plateCount,
+    cities: cloneCities(world.cities),
+    width: world.width,
+    height: world.height,
+    originX: world.originX,
+    originY: world.originY,
+    latRows: world.latRows,
+    label,
+  }
+}
+
+function restore(world: World, entry: HistoryEntry): void {
+  world.width = entry.width
+  world.height = entry.height
+  world.originX = entry.originX
+  world.originY = entry.originY
+  world.latRows = entry.latRows
+  world.elev = cloneElev(entry.elev)
+  world.plateId = clonePlateId(entry.plateId)
+  world.plateCount = entry.plateCount
+  world.cities = cloneCities(entry.cities)
+  ensureDerived(world)
+}
 
 export class EditHistory {
   private undoStack: HistoryEntry[] = []
@@ -21,13 +54,7 @@ export class EditHistory {
   }
 
   push(world: World, label: string): void {
-    this.undoStack.push({
-      elev: cloneElev(world.elev),
-      plateId: clonePlateId(world.plateId),
-      plateCount: world.plateCount,
-      cities: cloneCities(world.cities),
-      label,
-    })
+    this.undoStack.push(snapshot(world, label))
     if (this.undoStack.length > MAX) this.undoStack.shift()
     this.redoStack = []
   }
@@ -48,34 +75,16 @@ export class EditHistory {
   undo(world: World): string | null {
     const entry = this.undoStack.pop()
     if (!entry) return null
-    this.redoStack.push({
-      elev: cloneElev(world.elev),
-      plateId: clonePlateId(world.plateId),
-      plateCount: world.plateCount,
-      cities: cloneCities(world.cities),
-      label: entry.label,
-    })
-    world.elev.set(entry.elev)
-    world.plateId.set(entry.plateId)
-    world.plateCount = entry.plateCount
-    world.cities = cloneCities(entry.cities)
+    this.redoStack.push(snapshot(world, entry.label))
+    restore(world, entry)
     return entry.label
   }
 
   redo(world: World): string | null {
     const entry = this.redoStack.pop()
     if (!entry) return null
-    this.undoStack.push({
-      elev: cloneElev(world.elev),
-      plateId: clonePlateId(world.plateId),
-      plateCount: world.plateCount,
-      cities: cloneCities(world.cities),
-      label: entry.label,
-    })
-    world.elev.set(entry.elev)
-    world.plateId.set(entry.plateId)
-    world.plateCount = entry.plateCount
-    world.cities = cloneCities(entry.cities)
+    this.undoStack.push(snapshot(world, entry.label))
+    restore(world, entry)
     return entry.label
   }
 }

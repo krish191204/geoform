@@ -16,6 +16,16 @@ export function clonePlateId(plateId: Int16Array): Int16Array {
   return new Int16Array(plateId)
 }
 
+export function ensureDerived(world: World): void {
+  const n = world.width * world.height
+  if (world.temp.length === n && world.biome.length === n) return
+  world.temp = new Float32Array(n)
+  world.moist = new Float32Array(n)
+  world.flux = new Float32Array(n)
+  world.biome = new Array(n)
+  world.suitability = new Float32Array(n)
+}
+
 /** Soft falloff brush weight in [0,1]. */
 function weight(dx: number, dy: number, radius: number, softness: number): number {
   const d = Math.hypot(dx, dy)

@@ -21,6 +21,7 @@ import {
   suggestCities,
 } from './world/tools'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
+import { expandWorld, padsForZoomOut } from './world/expand'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell } from './render/draw'
 import type { Layer, Tool, World } from './world/types'
@@ -122,19 +123,75 @@ function applyViewTransform() {
   if (hud) hud.textContent = `${Math.round(viewZoom * 100)}%`
 }
 
+function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number } {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  const viewport = document.querySelector<HTMLElement>('#mapViewport')
+  const canvasRect = canvas?.getBoundingClientRect()
+  if (
+    canvasRect &&
+    clientX >= canvasRect.left &&
+    clientX <= canvasRect.right &&
+    clientY >= canvasRect.top &&
+    clientY <= canvasRect.bottom
+  ) {
+    return {
+      fx: (clientX - canvasRect.left) / Math.max(1, canvasRect.width),
+      fy: (clientY - canvasRect.top) / Math.max(1, canvasRect.height),
+    }
+  }
+  const vr = viewport?.getBoundingClientRect()
+  if (!vr) return { fx: 0.5, fy: 0.5 }
+  return {
+    fx: (clientX - vr.left) / Math.max(1, vr.width),
+    fy: (clientY - vr.top) / Math.max(1, vr.height),
+  }
+}
+
+function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
+  if (!world || busy || strokeActive || factor >= 1 || viewZoom > 1.001) return false
+  // If the canvas is already CSS-shrunk, grow enough that the old map stays
+  // the same on-screen size once we snap back to 100%.
+  const target = viewZoom < 0.999 ? viewZoom * factor : factor
+  const pads = padsForZoomOut(world, target, fx, fy)
+  if (!pads) return false
+  beginStroke('Expand map')
+  strokeActive = false
+  const ok = expandWorld(world, pads.left, pads.right, pads.top, pads.bottom)
+  if (!ok) {
+    history.cancelLast()
+    return false
+  }
+  viewZoom = 1
+  viewPanX = 0
+  viewPanY = 0
+  applyViewTransform()
+  renderer.invalidate()
+  setClimatePhase('updating')
+  scheduleClimateRecompute()
+  updateCities()
+  updateInspector()
+  updateHistoryButtons()
+  scheduleAutosave()
+  setStatus(`Atlas grew to ${world.width}×${world.height}`)
+  return true
+}
+
 function zoomAt(clientX: number, clientY: number, factor: number) {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
+  const { fx, fy } = zoomFocus(clientX, clientY)
+  if (tryExpandOnZoomOut(factor, fx, fy)) return
+
   const oldZoom = viewZoom
   const next = Math.max(0.55, Math.min(3.2, oldZoom * factor))
   if (next === oldZoom) return
   const rect = canvas.getBoundingClientRect()
   const w = Math.max(1, rect.width)
   const h = Math.max(1, rect.height)
-  const fx = (clientX - rect.left) / w
-  const fy = (clientY - rect.top) / h
-  viewPanX += (fx - 0.5) * w * (1 - next / oldZoom)
-  viewPanY += (fy - 0.5) * h * (1 - next / oldZoom)
+  const cfx = (clientX - rect.left) / w
+  const cfy = (clientY - rect.top) / h
+  viewPanX += (cfx - 0.5) * w * (1 - next / oldZoom)
+  viewPanY += (cfy - 0.5) * h * (1 - next / oldZoom)
   viewZoom = next
   applyViewTransform()
 }
@@ -289,7 +346,7 @@ function renderShell() {
 
         <p class="hint shortcuts">
           <strong>Paint</strong> drag · <strong>Pan</strong> Space+drag or middle mouse ·
-          <strong>Zoom</strong> scroll · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
+          <strong>Zoom</strong> scroll (out grows the atlas) · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
         </p>
       </aside>
 
@@ -960,6 +1017,13 @@ function startLoop() {
   raf = requestAnimationFrame(tick)
 }
 
+function rasterScale(w: World): number {
+  const cells = w.width * w.height
+  if (cells > 160_000) return 2
+  if (cells > 80_000) return 3
+  return 4
+}
+
 function paint() {
   if (!world) return
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
@@ -969,7 +1033,7 @@ function paint() {
     layer,
     showRivers: true,
     showCities: true,
-    scale: 4,
+    scale: rasterScale(world),
     hover,
     brush,
     tool,

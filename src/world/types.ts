@@ -56,6 +56,11 @@ export interface World {
   rawElevMax: number
   rawSeaThreshold: number
   engine: 'worldengine' | 'local'
+  /** World-space origin of cell (0,0); shifts when the map expands. */
+  originX: number
+  originY: number
+  /** Row count used for latitude 0..1; frozen at generate so expand does not restyle land. */
+  latRows: number
 }
 
 const FALLBACK_BIOME = '#6e7f6a'

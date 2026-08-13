@@ -211,6 +211,9 @@ export function generateWorld(width: number, height: number, seed: number): Worl
     rawElevMax: 1,
     rawSeaThreshold: seaLevel,
     engine: 'local',
+    originX: 0,
+    originY: 0,
+    latRows: height,
   }
 
   recomputeDerived(world)

@@ -225,7 +225,7 @@ interface WindParticle {
 function hashWorld(world: World): string {
   const mid = (world.elev.length / 2) | 0
   const q = (world.elev.length / 4) | 0
-  return `${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
+  return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
 }
 
 export class MapRenderer {

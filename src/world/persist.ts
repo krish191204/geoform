@@ -22,6 +22,9 @@ export interface SavedWorld {
   rawElevMax: number
   rawSeaThreshold: number
   engine: World['engine']
+  originX?: number
+  originY?: number
+  latRows?: number
 }
 
 export function serializeWorld(world: World): SavedWorld {
@@ -44,6 +47,9 @@ export function serializeWorld(world: World): SavedWorld {
     rawElevMax: world.rawElevMax,
     rawSeaThreshold: world.rawSeaThreshold,
     engine: world.engine,
+    originX: world.originX,
+    originY: world.originY,
+    latRows: world.latRows,
   }
 }
 
@@ -70,6 +76,9 @@ export function deserializeWorld(data: SavedWorld): World {
     rawElevMax: data.rawElevMax,
     rawSeaThreshold: data.rawSeaThreshold,
     engine: data.engine,
+    originX: data.originX ?? 0,
+    originY: data.originY ?? 0,
+    latRows: data.latRows ?? data.height,
   }
   recomputeSuitability(world)
   return world

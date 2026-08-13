@@ -14,11 +14,16 @@ export function classifyBiome(elev: number, sea: number, temp: number, moist: nu
   return 'grassland'
 }
 
+function climateLat(world: World, y: number): number {
+  const span = Math.max(1, world.latRows - 1)
+  return Math.max(0, Math.min(1, (y + world.originY) / span))
+}
+
 export function recomputeClimate(world: World): void {
   const { width: w, height: h, elev, seaLevel, temp, moist } = world
 
   for (let y = 0; y < h; y++) {
-    const lat = y / (h - 1)
+    const lat = climateLat(world, y)
     // Latitude bands: wet tropics/mid, drier horse latitudes, wet temperate, dry poles
     const band =
       0.55 +

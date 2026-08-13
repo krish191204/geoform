@@ -1,7 +1,11 @@
 import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
 
-export function worldFromPayload(payload: WorldEnginePayload, keepCities: World['cities'] = []): World {
+export function worldFromPayload(
+  payload: WorldEnginePayload,
+  keepCities: World['cities'] = [],
+  frame?: { originX: number; originY: number; latRows: number },
+): World {
   const n = payload.width * payload.height
   const world: World = {
     width: payload.width,
@@ -23,6 +27,9 @@ export function worldFromPayload(payload: WorldEnginePayload, keepCities: World[
     rawElevMax: payload.rawElevMax,
     rawSeaThreshold: payload.rawSeaThreshold,
     engine: 'worldengine',
+    originX: frame?.originX ?? 0,
+    originY: frame?.originY ?? 0,
+    latRows: frame?.latRows ?? payload.height,
   }
   recomputeSuitability(world)
   return world
@@ -68,5 +75,9 @@ export async function recomputeWorldEngine(world: World): Promise<World> {
     throw new Error(err.error || `WorldEngine recompute failed (${res.status})`)
   }
   const payload = (await res.json()) as WorldEnginePayload
-  return worldFromPayload(payload, world.cities)
+  return worldFromPayload(payload, world.cities, {
+    originX: world.originX,
+    originY: world.originY,
+    latRows: world.latRows,
+  })
 }
