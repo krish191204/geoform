@@ -27,7 +27,7 @@ export function mountRain(root: HTMLElement, onNarrate: (t: string) => void): St
           <div>Leeward moisture</div>
           <div class="meter dry" id="dryMeter"><span></span></div>
         </div>
-        <p class="hint">West wind climbs, rains, then descends dry. Watch the lee bleach into arid gold.</p>
+        <p class="hint">West wind climbs, rains, then descends dry — the same orography the atlas runs on every climate pass.</p>
       </div>
     </div>
   `

@@ -1,5 +1,6 @@
 import { evaluateSuitability } from './climate'
 import { nextCityName } from './generate'
+import { fbm } from './noise'
 import type { City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -12,9 +13,32 @@ export function cloneCities(cities: City[]): City[] {
   return cities.map((c) => ({ ...c }))
 }
 
-/** Soft falloff brush weight in [0,1]. */
-function weight(dx: number, dy: number, radius: number, softness: number): number {
-  const d = Math.hypot(dx, dy)
+export function clonePlateId(plateId: Int16Array): Int16Array {
+  return new Int16Array(plateId)
+}
+
+export function ensureDerived(world: World): void {
+  const n = world.width * world.height
+  if (world.temp.length === n && world.biome.length === n) return
+  world.temp = new Float32Array(n)
+  world.moist = new Float32Array(n)
+  world.flux = new Float32Array(n)
+  world.biome = new Array(n)
+  world.suitability = new Float32Array(n)
+}
+
+/** Soft falloff brush weight in [0,1], with a ragged radius so stamps are not geometric. */
+function weight(
+  dx: number,
+  dy: number,
+  radius: number,
+  softness: number,
+  x = 0,
+  y = 0,
+  seed = 0,
+): number {
+  const warp = seed ? (fbm(x / 5.5, y / 5.5, seed, 3) - 0.5) * radius * 0.42 : 0
+  const d = Math.hypot(dx, dy) + warp
   if (d > radius) return 0
   const t = 1 - d / radius
   const soft = Math.max(0.15, Math.min(1, softness))
@@ -31,9 +55,10 @@ export function brushRaise(
 ): void {
   const { width: w, height: h, elev } = world
   const r = Math.max(1, radius)
-  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
-    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
-      const wt = weight(x - cx, y - cy, r, softness)
+  const pad = Math.ceil(r * 0.5)
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      const wt = weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)
       if (!wt) continue
       const i = idx(w, x, y)
       elev[i] = Math.max(0, Math.min(1, elev[i] + amount * wt * wt))
@@ -52,9 +77,10 @@ export function brushSmooth(
   const { width: w, height: h, elev } = world
   const r = Math.max(1, radius)
   const src = cloneElev(elev)
-  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
-    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
-      const wt = weight(x - cx, y - cy, r, softness)
+  const pad = Math.ceil(r * 0.5)
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      const wt = weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)
       if (!wt) continue
       let sum = 0
       let n = 0
@@ -137,20 +163,21 @@ export function brushPlateau(
 ): void {
   const { width: w, height: h, elev } = world
   const r = Math.max(1, radius)
+  const pad = Math.ceil(r * 0.5)
   let sum = 0
   let n = 0
-  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
-    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
-      if (!weight(x - cx, y - cy, r, softness)) continue
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      if (!weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)) continue
       sum += elev[idx(w, x, y)]
       n++
     }
   }
   if (!n) return
   const target = sum / n
-  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
-    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
-      const wt = weight(x - cx, y - cy, r, softness)
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      const wt = weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)
       if (!wt) continue
       const i = idx(w, x, y)
       elev[i] = elev[i] + (target - elev[i]) * strength * wt
@@ -170,10 +197,11 @@ export function brushSeaLevel(
 ): void {
   const { width: w, height: h, elev, seaLevel } = world
   const r = Math.max(1, radius)
+  const pad = Math.ceil(r * 0.5)
   const target = toSea ? seaLevel - 0.06 : seaLevel + 0.05
-  for (let y = Math.max(0, cy - r); y <= Math.min(h - 1, cy + r); y++) {
-    for (let x = Math.max(0, cx - r); x <= Math.min(w - 1, cx + r); x++) {
-      const wt = weight(x - cx, y - cy, r, softness)
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      const wt = weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)
       if (!wt) continue
       const i = idx(w, x, y)
       elev[i] = elev[i] + (target - elev[i]) * strength * wt

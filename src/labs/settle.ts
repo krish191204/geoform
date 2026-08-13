@@ -55,7 +55,7 @@ export function mountSettle(root: HTMLElement, onNarrate: (t: string) => void): 
           <div><span>Best sites</span><strong id="bestN">—</strong></div>
           <div><span>Peak score</span><strong id="peakScore">—</strong></div>
         </div>
-        <p class="hint">Warm glow = high suitability. Cities mark local peaks of the score field.</p>
+        <p class="hint">Warm glow = high suitability. Same idea as Suggest cities on the atlas — people follow water, slope, and climate.</p>
       </div>
     </div>
   `

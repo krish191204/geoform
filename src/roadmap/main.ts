@@ -3,6 +3,7 @@ import { navHtml } from '../chrome/nav'
 import {
   DATASETS,
   PHASES,
+  SHIPPED,
   STAGES,
   WEEK_TASKS,
   type DatasetCard,
@@ -57,21 +58,32 @@ function render() {
         <div class="hero-veil"></div>
         <div class="hero-copy">
           <h1>Roadmap</h1>
-          <p>From toy continents to Earth-taught climate. Walk the accuracy pipeline — feel rain shadows, stock the data vault, and track what to do this week.</p>
+          <p>T0 is shipping: a local atlas that keeps continents, drains rivers, and repairs impossible geography instead of warning. Next is Earth-taught climate — rain shadows fitted to real mountains.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" data-jump="pipeline">Walk the pipeline</button>
             <button type="button" class="chip-btn" data-jump="demo">Play the rain shadow</button>
-            <a class="chip-btn" href="/labs.html">More geography labs</a>
+            <a class="chip-btn" href="/labs.html">Geography labs</a>
+            <a class="chip-btn" href="/critique.html">Critique</a>
             <button type="button" class="chip-btn" data-jump="week">This week’s checklist</button>
           </div>
         </div>
       </header>
 
+      <section class="section" id="shipped">
+        <div class="section-head">
+          <div>
+            <h2>Already in the atlas</h2>
+            <p>The map editor, labs, and critique share one local engine. These rules run now — they are not a later phase.</p>
+          </div>
+        </div>
+        <div class="vault" id="shippedGrid"></div>
+      </section>
+
       <section class="section" id="pipeline">
         <div class="section-head">
           <div>
             <h2>The pipeline</h2>
-            <p>Seven stages. Click each one. This is the spine of accurate Geoform — not a feature list, a process.</p>
+            <p>Seven stages toward Earth-calibrated climate. The local atlas already does stage-shaped work (height → climate → rivers → cities). This spine is how we lock it to Earth data.</p>
           </div>
         </div>
         <div class="panel pipeline">
@@ -178,12 +190,14 @@ function render() {
       <p class="footer-note">
         Deep reference: <a href="/docs/ACCURACY_ROADMAP.md">docs/ACCURACY_ROADMAP.md</a>
         · Map editor: <a href="/">/</a>
-        · Tooling clones live under <code>vendor-skills/</code> for shadcn MCP, Convex skills, UI/UX Pro Max, Anthropic skills.
+        · Labs: <a href="/labs.html">/labs.html</a>
+        · Critique: <a href="/critique.html">/critique.html</a>
       </p>
     </div>
   `
 
   // Fill dynamic bits without full re-render thrash for canvases — bind after paint
+  paintShipped()
   paintStageRail()
   paintStageDetail(stage)
   paintDatasets(ds)
@@ -193,6 +207,18 @@ function render() {
   startHero()
   startOro()
   updateOroMeters()
+}
+
+function paintShipped() {
+  const el = document.querySelector('#shippedGrid')
+  if (!el) return
+  el.innerHTML = SHIPPED.map(
+    (item) => `
+    <article>
+      <h3>${item.title}</h3>
+      <p>${item.detail}</p>
+    </article>`,
+  ).join('')
 }
 
 function paintStageRail() {

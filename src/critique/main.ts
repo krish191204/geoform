@@ -6,6 +6,9 @@ import {
   type ImageMode,
 } from './analyzeImage'
 import { analyzeGeoformWorld } from './analyzeWorld'
+import { getGeoformSamples, repairedCopy, worldToJson, type GeoformSample } from './geoformSamples'
+import { deserializeWorld, type SavedWorld } from '../world/persist'
+import type { World } from '../world/types'
 import { drawCritiquePreview } from './preview'
 import { getAllSamples, sampleToCanvas, type SampleMap } from './sampleMaps'
 import { KIND_LABEL, SEVERITY_LABEL, type CritiqueResult, type IssueKind, type Severity } from './types'
@@ -20,6 +23,14 @@ let raf = 0
 let mode: ImageMode = 'auto'
 let lastFile: File | null = null
 let galleryScores: Record<string, number> = {}
+let geoformScores: Record<string, number> = {}
+let geoformCache: GeoformSample[] | null = null
+let lastWorld: World | null = null
+
+function geoformList() {
+  if (!geoformCache) geoformCache = getGeoformSamples()
+  return geoformCache
+}
 
 function render() {
   const samples = getAllSamples()
@@ -31,13 +42,24 @@ function render() {
         <div class="hero-veil"></div>
         <div class="hero-copy">
           <h1>Critique</h1>
-          <p>Upload a map — or run the fixture gallery. Synthetic crimes, Earth-pattern rain shadows, and owned fantasy benchmarks get graded live.</p>
+          <p>The atlas repairs broken geography as you paint. This page grades maps you bring in — fixture crimes, Earth-pattern rain shadows, Geoform JSON, and owned fantasy benchmarks.</p>
           <div class="hero-actions">
-            <button type="button" class="chip-btn btn-primary" id="pickFile">Upload image</button>
-            <button type="button" class="chip-btn" data-jump="gallery">Open fixture gallery</button>
+            <button type="button" class="chip-btn btn-primary" id="pickFile">Upload image or JSON</button>
+            <button type="button" class="chip-btn" data-jump="geoform">Geoform worlds</button>
+            <button type="button" class="chip-btn" data-jump="gallery">Image fixtures</button>
           </div>
         </div>
       </header>
+
+      <section class="panel" id="geoform">
+        <div class="section-head-inline">
+          <div>
+            <h2>Geoform worlds</h2>
+            <p class="muted">Live local-atlas samples. Broken cards are what the editor now repairs on its own — critique still names the crime.</p>
+          </div>
+        </div>
+        <div class="gallery-grid" id="geoformGrid"></div>
+      </section>
 
       <section class="panel" id="gallery">
         <div class="section-head-inline">
@@ -52,10 +74,10 @@ function render() {
 
       <section class="panel">
         <div class="drop" id="drop">
-          <h2>Drop your own map image</h2>
+          <h2>Drop a map image or Geoform JSON</h2>
           <p>
-            <strong>PNG / JPG / WebP / GIF</strong> — painted atlases or grayscale heightmaps.
-            Toggle mode if auto-detect guesses wrong.
+            <strong>PNG / JPG / WebP / GIF</strong> for painted atlases, or a <strong>Geoform export</strong> (<code>.json</code>)
+            from the editor. Toggle mode if auto-detect guesses wrong.
           </p>
           <div class="mode-row" id="modeRow">
             <button type="button" class="chip-btn ${mode === 'auto' ? 'active' : ''}" data-mode="auto">Auto</button>
@@ -65,7 +87,7 @@ function render() {
           <div class="drop-actions">
             <button type="button" class="chip-btn btn-primary" id="pickFile2">Choose image</button>
           </div>
-          <input class="hidden-file" id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" />
+          <input class="hidden-file" id="file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,application/json,.json" />
         </div>
 
         <div class="workspace" id="workspace" hidden>
@@ -83,13 +105,17 @@ function render() {
       </section>
 
       <p class="footer-note">
-        Policy: Earth AOIs calibrate physics; these images only benchmark the critic.
-        See <a href="/docs/TRAINING_AND_TESTS.md">TRAINING_AND_TESTS.md</a>.
+        Policy: Earth AOIs calibrate physics; these images and Geoform exports benchmark the critic.
+        The map editor does not nag — it repairs. Critique is the place that still says the quiet part out loud.
+        See <a href="/docs/TRAINING_AND_TESTS.md">TRAINING_AND_TESTS.md</a>
+        · Labs: <a href="/labs.html">/labs.html</a>
+        · Editor: <a href="/">/</a>
       </p>
     </div>
   `
 
   paintGallery(samples)
+  paintGeoform()
   bind(samples)
   if (result) paintResult()
 }
@@ -122,6 +148,71 @@ function paintGallery(samples: SampleMap[]) {
   })
 }
 
+function worldThumb(world: World): string {
+  const c = document.createElement('canvas')
+  c.width = world.width
+  c.height = world.height
+  const ctx = c.getContext('2d')!
+  const img = ctx.createImageData(world.width, world.height)
+  const sea = world.seaLevel
+  for (let i = 0; i < world.elev.length; i++) {
+    const o = i * 4
+    if (world.elev[i] < sea) {
+      img.data[o] = 32
+      img.data[o + 1] = 86
+      img.data[o + 2] = 112
+    } else {
+      const t = Math.max(0, Math.min(1, (world.elev[i] - sea) * 2.2))
+      img.data[o] = (70 + t * 90) | 0
+      img.data[o + 1] = (118 + t * 50) | 0
+      img.data[o + 2] = (62 + t * 30) | 0
+    }
+    img.data[o + 3] = 255
+  }
+  ctx.putImageData(img, 0, 0)
+  return c.toDataURL('image/png')
+}
+
+function paintGeoform() {
+  const grid = root.querySelector('#geoformGrid')
+  if (!grid) return
+  const samples = geoformList()
+  grid.innerHTML = samples
+    .map((s) => {
+      const score = geoformScores[s.id]
+      return `
+      <button type="button" class="gallery-card" data-geoform="${s.id}">
+        <img src="${worldThumb(s.world)}" alt="${s.title}" />
+        <div class="gallery-meta">
+          <strong>${s.title}</strong>
+          <span class="corpus">${s.kind}</span>
+          <span class="score-pill">${score == null ? '—' : score}</span>
+        </div>
+        <p>${s.blurb}</p>
+      </button>`
+    })
+    .join('')
+  grid.querySelectorAll<HTMLButtonElement>('[data-geoform]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const sample = samples.find((s) => s.id === btn.dataset.geoform)
+      if (sample) runGeoform(sample)
+    })
+  })
+}
+
+function runGeoform(sample: GeoformSample) {
+  lastFile = null
+  lastWorld = sample.world
+  result = analyzeGeoformWorld(worldToJson(sample.world))
+  result.label = sample.title
+  geoformScores[sample.id] = result.score
+  previewImage = null
+  activeId = result.issues[0]?.id ?? null
+  filter = 'all'
+  paintGeoform()
+  paintResult()
+}
+
 function gradeSample(sample: SampleMap) {
   const r = analyzeRawPixels(sample.data, sample.width, sample.height, sample.id, mode === 'auto' ? sample.mode : mode)
   galleryScores[sample.id] = r.score
@@ -130,6 +221,7 @@ function gradeSample(sample: SampleMap) {
 
 async function runSample(sample: SampleMap) {
   lastFile = null
+  lastWorld = null
   const r = gradeSample(sample)
   result = r
   previewImage = sampleToCanvas(sample)
@@ -201,16 +293,18 @@ async function ingest(file: File) {
         const text = await file.text()
         previewImage = null
         lastFile = null
-        result = analyzeGeoformWorld(JSON.parse(text))
+        lastWorld = deserializeWorld(JSON.parse(text) as SavedWorld, { repair: false })
+        result = analyzeGeoformWorld(worldToJson(lastWorld))
         activeId = result.issues[0]?.id ?? null
         filter = 'all'
         paintResult()
         return
       }
-      throw new Error('Drop a map image (PNG, JPG, WebP, or GIF).')
+      throw new Error('Drop a map image (PNG, JPG, WebP, or GIF) or a Geoform JSON export.')
     }
 
     lastFile = file
+    lastWorld = null
     result = await analyzeMapImage(file, { mode })
     previewImage = await createImageBitmap(file).catch(async () => {
       const url = URL.createObjectURL(file)
@@ -243,8 +337,24 @@ function paintResult() {
       <div class="big">${result.score}</div>
       <p>${result.summary}</p>
       <p style="margin-top:0.45rem">${escapeHtml(result.label)} · ${result.width}×${result.height}</p>
+      ${
+        lastWorld
+          ? `<button type="button" class="chip-btn" id="repairWorld" style="margin-top:0.7rem">Repair like the editor</button>`
+          : ''
+      }
     </div>
   `
+
+  root.querySelector('#repairWorld')?.addEventListener('click', () => {
+    if (!lastWorld) return
+    lastWorld = repairedCopy(lastWorld)
+    result = analyzeGeoformWorld(worldToJson(lastWorld))
+    result.label = `${result.label} · repaired`
+    previewImage = null
+    activeId = result.issues[0]?.id ?? null
+    filter = 'all'
+    paintResult()
+  })
 
   const filters = root.querySelector('#filters')!
   const counts: Record<string, number> = { all: result.issues.length }

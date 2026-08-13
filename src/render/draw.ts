@@ -201,6 +201,119 @@ function cellColor(
   return rgb
 }
 
+export type MapLook = Layer | 'satellite' | 'night'
+
+function satelliteColor(world: World, x: number, y: number): [number, number, number] {
+  const { width: w, seaLevel } = world
+  const i = y * w + x
+  const e = world.elev[i]
+  if (e < seaLevel) {
+    const t = e / Math.max(1e-6, seaLevel)
+    if (t < 0.4) return mix([4, 18, 42], [12, 52, 92], t / 0.4)
+    return mix([12, 52, 92], [40, 120, 130], (t - 0.4) / 0.6)
+  }
+  const bio = hexToRgb(biomeColor(world.biome[i]))
+  const rel = elevColor(e, seaLevel)
+  return mix(rel, bio, 0.55)
+}
+
+function nightColor(world: World, x: number, y: number): [number, number, number] {
+  const { width: w, seaLevel } = world
+  const i = y * w + x
+  const e = world.elev[i]
+  let rgb: [number, number, number]
+  if (e < seaLevel) {
+    rgb = mix([6, 12, 28], [14, 28, 52], e / Math.max(1e-6, seaLevel))
+  } else {
+    const t = (e - seaLevel) / Math.max(1e-6, 1 - seaLevel)
+    rgb = mix([22, 28, 38], [48, 52, 62], Math.min(1, t * 1.4))
+  }
+  let lights = 0
+  if (e >= seaLevel) {
+    lights += Math.max(0, world.suitability[i] - 0.55) * 0.9
+    for (const c of world.cities) {
+      const d = Math.hypot(c.x - x, c.y - y)
+      if (d < 3.5) lights = Math.max(lights, 1 - d / 3.5)
+    }
+  }
+  if (lights > 0) rgb = mix(rgb, [255, 210, 140], Math.min(1, lights))
+  return rgb
+}
+
+function lookColor(world: World, look: MapLook, x: number, y: number, time = 0): [number, number, number] {
+  if (look === 'satellite') {
+    let rgb = satelliteColor(world, x, y)
+    const e = world.elev[y * world.width + x]
+    const er = sampleElev(world, Math.min(world.width - 1.001, x + 1), y)
+    const ed = sampleElev(world, x, Math.min(world.height - 1.001, y + 1))
+    const shade = 0.72 + (e - er) * 4.2 + (e - ed) * 3.0
+    const lit = 0.4 + 0.6 * clamp(shade, 0.45, 1.35) / 1.15
+    return [clamp(rgb[0] * lit), clamp(rgb[1] * lit), clamp(rgb[2] * lit)]
+  }
+  if (look === 'night') return nightColor(world, x, y)
+  return cellColor(world, look, x, y, look === 'plates' ? 0 : 1, time)
+}
+
+export function bakeWorldImageData(world: World, look: MapLook, scale = 2): ImageData {
+  const { width: w, height: h } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const [r, g, b] = lookColor(world, look, x, y, 0)
+      const o = (py * cw + px) * 4
+      data[o] = r
+      data[o + 1] = g
+      data[o + 2] = b
+      data[o + 3] = 255
+    }
+  }
+  if (look !== 'night') {
+    for (const c of world.cities) {
+      const cx = Math.round((c.x + 0.5) * scale)
+      const cy = Math.round((c.y + 0.5) * scale)
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const px = cx + dx
+          const py = cy + dy
+          if (px < 0 || py < 0 || px >= cw || py >= ch) continue
+          const o = (py * cw + px) * 4
+          data[o] = 245
+          data[o + 1] = 236
+          data[o + 2] = 214
+        }
+      }
+    }
+  }
+  return image
+}
+
+export function bakeBumpImageData(world: World, scale = 2): ImageData {
+  const { width: w, height: h, elev, seaLevel } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const e = elev[y * w + x]
+      const v = e < seaLevel ? Math.round((e / seaLevel) * 70) : Math.round(90 + ((e - seaLevel) / Math.max(1e-6, 1 - seaLevel)) * 165)
+      const o = (py * cw + px) * 4
+      data[o] = v
+      data[o + 1] = v
+      data[o + 2] = v
+      data[o + 3] = 255
+    }
+  }
+  return image
+}
+
 export interface DrawOptions {
   layer: Layer
   showRivers: boolean
@@ -225,7 +338,7 @@ interface WindParticle {
 function hashWorld(world: World): string {
   const mid = (world.elev.length / 2) | 0
   const q = (world.elev.length / 4) | 0
-  return `${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.cities.length}`
+  return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
 }
 
 export class MapRenderer {
@@ -456,6 +569,34 @@ export class MapRenderer {
   }
 }
 
+/** Normalize a client point onto a contain-fitted bitmap (object-fit: contain). */
+export function clientToContainedBitmap(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  bitmapW: number,
+  bitmapH: number,
+): { nx: number; ny: number } | null {
+  if (rect.width < 1 || rect.height < 1 || bitmapW < 1 || bitmapH < 1) return null
+  const boxAspect = rect.width / rect.height
+  const bmpAspect = bitmapW / bitmapH
+  let left = rect.left
+  let top = rect.top
+  let drawW = rect.width
+  let drawH = rect.height
+  if (boxAspect > bmpAspect + 1e-6) {
+    drawW = drawH * bmpAspect
+    left += (rect.width - drawW) / 2
+  } else if (bmpAspect > boxAspect + 1e-6) {
+    drawH = drawW / bmpAspect
+    top += (rect.height - drawH) / 2
+  }
+  const nx = (clientX - left) / drawW
+  const ny = (clientY - top) / drawH
+  if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null
+  return { nx, ny }
+}
+
 export function screenToCell(
   canvas: HTMLCanvasElement,
   clientX: number,
@@ -463,8 +604,10 @@ export function screenToCell(
   world: World,
 ): { x: number; y: number } | null {
   const rect = canvas.getBoundingClientRect()
-  const x = Math.floor(((clientX - rect.left) / rect.width) * world.width)
-  const y = Math.floor(((clientY - rect.top) / rect.height) * world.height)
+  const mapped = clientToContainedBitmap(clientX, clientY, rect, canvas.width, canvas.height)
+  if (!mapped) return null
+  const x = Math.floor(mapped.nx * world.width)
+  const y = Math.floor(mapped.ny * world.height)
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return null
   return { x, y }
 }

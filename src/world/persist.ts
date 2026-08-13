@@ -1,5 +1,7 @@
 import type { World } from './types'
-import { recomputeSuitability } from './climate'
+import { refreshGeography } from './geography'
+import { landFraction } from './land'
+import { clampContinentMass, DEFAULT_CONTINENT_MASS } from './mass'
 
 const STORAGE_KEY = 'geoform.autosave.v1'
 
@@ -22,6 +24,13 @@ export interface SavedWorld {
   rawElevMax: number
   rawSeaThreshold: number
   engine: World['engine']
+  originX?: number
+  originY?: number
+  latRows?: number
+  landRatio?: number
+  continentMass?: 'continents' | 'mixed' | 'islands'
+  plateVx?: number[]
+  plateVy?: number[]
 }
 
 export function serializeWorld(world: World): SavedWorld {
@@ -44,10 +53,17 @@ export function serializeWorld(world: World): SavedWorld {
     rawElevMax: world.rawElevMax,
     rawSeaThreshold: world.rawSeaThreshold,
     engine: world.engine,
+    originX: world.originX,
+    originY: world.originY,
+    latRows: world.latRows,
+    landRatio: world.landRatio,
+    continentMass: world.continentMass,
+    plateVx: Array.from(world.plateVx),
+    plateVy: Array.from(world.plateVy),
   }
 }
 
-export function deserializeWorld(data: SavedWorld): World {
+export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }): World {
   if (data.version !== 1) throw new Error(`Unsupported save version: ${data.version}`)
   const n = data.width * data.height
   if (data.elev.length !== n) throw new Error('Corrupt save: elevation size mismatch')
@@ -70,8 +86,17 @@ export function deserializeWorld(data: SavedWorld): World {
     rawElevMax: data.rawElevMax,
     rawSeaThreshold: data.rawSeaThreshold,
     engine: data.engine,
+    originX: data.originX ?? 0,
+    originY: data.originY ?? 0,
+    latRows: data.latRows ?? data.height,
+    landRatio: 0,
+    continentMass: DEFAULT_CONTINENT_MASS,
+    plateVx: Float32Array.from(data.plateVx ?? []),
+    plateVy: Float32Array.from(data.plateVy ?? []),
   }
-  recomputeSuitability(world)
+  world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
+  world.continentMass = clampContinentMass(data.continentMass)
+  if (opts?.repair !== false) refreshGeography(world, { sculpt: false })
   return world
 }
 
