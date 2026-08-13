@@ -25,9 +25,9 @@ export class PlanetView {
   private sun: THREE.DirectionalLight
   private colorTex: THREE.CanvasTexture | null = null
   private bumpTex: THREE.CanvasTexture | null = null
-  private yaw = 0.55
-  private pitch = 0.18
-  private distance = 2.65
+  private yaw = 0.85
+  private pitch = 0.22
+  private distance = 3.15
   private dragging = false
   private lastX = 0
   private lastY = 0
@@ -131,8 +131,9 @@ export class PlanetView {
     mat.emissiveMap = night ? this.colorTex : null
     mat.emissiveIntensity = night ? 0.85 : 0
     mat.needsUpdate = true
-    this.atmosphere.visible = !night
-    this.sun.intensity = night ? 0.12 : 1.35
+    this.atmosphere.visible = true
+    ;(this.atmosphere.material as THREE.MeshBasicMaterial).opacity = night ? 0.1 : 0.18
+    this.sun.intensity = night ? 0.35 : 1.35
   }
 
   orbit(dx: number, dy: number): void {
@@ -147,9 +148,9 @@ export class PlanetView {
   }
 
   reset(): void {
-    this.yaw = 0.55
-    this.pitch = 0.18
-    this.distance = 2.65
+    this.yaw = 0.85
+    this.pitch = 0.22
+    this.distance = 3.15
     this.applyCamera()
   }
 

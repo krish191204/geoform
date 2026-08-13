@@ -223,10 +223,10 @@ function nightColor(world: World, x: number, y: number): [number, number, number
   const e = world.elev[i]
   let rgb: [number, number, number]
   if (e < seaLevel) {
-    rgb = mix([2, 6, 16], [8, 18, 36], e / Math.max(1e-6, seaLevel))
+    rgb = mix([6, 12, 28], [14, 28, 52], e / Math.max(1e-6, seaLevel))
   } else {
     const t = (e - seaLevel) / Math.max(1e-6, 1 - seaLevel)
-    rgb = mix([8, 12, 18], [28, 32, 40], Math.min(1, t * 1.4))
+    rgb = mix([22, 28, 38], [48, 52, 62], Math.min(1, t * 1.4))
   }
   let lights = 0
   if (e >= seaLevel) {
