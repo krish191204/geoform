@@ -957,7 +957,9 @@ function bind() {
   document.querySelector('#regen')!.addEventListener('click', () => {
     if (busy) return
     askNewWorld(() => {
-      seed = Number(document.querySelector<HTMLInputElement>('#seed')!.value) || 1
+      seed = (Math.random() * 1e9) | 0
+      const seedInput = document.querySelector<HTMLInputElement>('#seed')
+      if (seedInput) seedInput.value = String(seed)
       void loadWorld(seed)
     })
   })
