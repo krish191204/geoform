@@ -1,4 +1,5 @@
 import './style.css'
+import { navHtml } from '../chrome/nav'
 import {
   analyzeMapImage,
   analyzeRawPixels,
@@ -24,20 +25,12 @@ function render() {
   const samples = getAllSamples()
   root.innerHTML = `
     <div class="shell">
-      <nav class="topnav">
-        <a class="brand-lock" href="/">Geoform</a>
-        <div class="nav-links">
-          <a href="/">Map editor</a>
-          <a href="/labs.html">Geography labs</a>
-          <a href="/roadmap.html">Accuracy roadmap</a>
-          <a href="/docs/TRAINING_AND_TESTS.md">Training policy</a>
-        </div>
-      </nav>
+      ${navHtml('critique')}
 
       <header class="hero">
         <div class="hero-veil"></div>
         <div class="hero-copy">
-          <h1>Geoform</h1>
+          <h1>Critique</h1>
           <p>Upload a map — or run the fixture gallery. Synthetic crimes, Earth-pattern rain shadows, and owned fantasy benchmarks get graded live.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" id="pickFile">Upload image</button>

@@ -1,4 +1,5 @@
 import './style.css'
+import { navHtml } from '../chrome/nav'
 import { LABS, type LabId } from './content'
 import { mountElevation } from './elevation'
 import { mountRain } from './rain'
@@ -21,22 +22,14 @@ function render() {
   const lab = labMeta(active)
   root.innerHTML = `
     <div class="shell">
-      <nav class="topnav">
-        <a class="brand-lock" href="/">Geoform</a>
-        <div class="nav-links">
-          <a href="/">Map editor</a>
-          <a href="/critique.html">Map critique</a>
-          <a href="/roadmap.html">Accuracy roadmap</a>
-          <a href="/docs/ACCURACY_ROADMAP.md">Full report</a>
-        </div>
-      </nav>
+      ${navHtml('labs')}
 
       <header class="hero">
         <canvas class="hero-canvas" id="heroCanvas" aria-hidden="true"></canvas>
         <div class="hero-veil"></div>
         <div class="hero-copy">
-          <h1>Geoform</h1>
-          <p>Geography labs — small interactive slices of elevation, rivers, rain shadows, plate edges, and settlement. Feel the rules before they fill a whole map.</p>
+          <h1>Labs</h1>
+          <p>Small interactive slices of elevation, rivers, rain shadows, plate edges, and settlement. Feel the rules before they fill a whole map.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" data-jump="labs">Open a lab</button>
             <a class="chip-btn" href="/roadmap.html">Accuracy roadmap</a>
