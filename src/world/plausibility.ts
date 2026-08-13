@@ -1,4 +1,4 @@
-import { landmassStats, type ContinentMass } from './mass'
+import { landBboxFill, landmassStats, type ContinentMass } from './mass'
 import type { World } from './types'
 
 export type FlagSeverity = 'impossible' | 'unlikely' | 'note'
@@ -106,12 +106,13 @@ export function flagImpossibleGeography(world: World, mass?: ContinentMass): Geo
     })
   }
 
-  if (stats.axisAlignedCoastShare > 0.42 && stats.landCells > 40) {
+  const fill = landBboxFill(world)
+  if (fill > 0.8 && stats.landCells > 40 && stats.components <= 4) {
     flags.push({
       id: 'rectangle',
       severity: 'impossible',
       title: 'Straight walls are not coasts',
-      detail: `${Math.round(stats.axisAlignedCoastShare * 100)}% of the shoreline is axis-aligned. Real plates do not stamp rectangles in the middle of the sea.`,
+      detail: `${Math.round(fill * 100)}% of the land’s bounding box is filled. Real plates do not stamp rectangles in the middle of the sea.`,
     })
   }
 

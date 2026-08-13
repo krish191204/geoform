@@ -52,6 +52,19 @@ describe('full continents vs island world', () => {
     const continents = generateWorld(96, 48, 21, 0.4, 'continents')
     expect(landmassStats(islands).components).toBeGreaterThan(landmassStats(continents).components)
   })
+
+  it('keeps full continents even on a wet 22% land mix', () => {
+    for (const seed of [3, 21, 88]) {
+      const world = generateWorld(160, 80, seed, 0.22, 'continents')
+      const stats = landmassStats(world)
+      expect(stats.components, `seed ${seed} components`).toBeLessThan(12)
+      expect(stats.largestShare, `seed ${seed} largest share`).toBeGreaterThan(0.4)
+      expect(stats.speckleShare, `seed ${seed} speckles`).toBeLessThan(0.08)
+      expect(flagImpossibleGeography(world, 'continents').some((f) => f.id === 'pimples')).toBe(
+        false,
+      )
+    }
+  })
 })
 
 describe('flagImpossibleGeography', () => {

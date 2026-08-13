@@ -29,6 +29,7 @@ import {
   clampContinentMass,
   CONTINENT_MASS_OPTIONS,
   DEFAULT_CONTINENT_MASS,
+  reshapeLandmasses,
   type ContinentMass,
 } from './world/mass'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
@@ -954,6 +955,7 @@ function bind() {
     if (!world || busy) return
     if (!strokeActive) beginStroke('Land / water')
     applyLandRatio(world, landRatio)
+    reshapeLandmasses(world)
     renderer.invalidate()
     updateCities()
     updateInspector()
@@ -1456,7 +1458,11 @@ function updateInspector() {
       <dt>Plate</dt><dd>#${src.plateId[i]}</dd>
     </dl>
     <ul class="reasons">
-      ${suit.reasons.map((r) => `<li class="${suit.ok ? 'good' : 'bad'}">${r}</li>`).join('')}
+      ${
+        above
+          ? suit.reasons.map((r) => `<li class="${suit.ok ? 'good' : 'bad'}">${r}</li>`).join('')
+          : '<li>Open water</li>'
+      }
     </ul>
   `
 }

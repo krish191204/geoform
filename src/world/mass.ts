@@ -1,3 +1,5 @@
+import { fbm } from './noise'
+import { chewStraightCoasts, meanderCoasts } from './coasts'
 import type { World } from './types'
 
 export type ContinentMass = 'continents' | 'mixed' | 'islands'
@@ -191,6 +193,28 @@ export function landmassStats(
   }
 }
 
+/** How completely land fills its bounding box — ~1 is a stamped rectangle. */
+export function landBboxFill(world: Pick<World, 'width' | 'height' | 'elev' | 'seaLevel'>): number {
+  const { width: w, height: h, elev, seaLevel: sea } = world
+  let minx = w
+  let maxx = 0
+  let miny = h
+  let maxy = 0
+  let land = 0
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (elev[y * w + x] < sea) continue
+      land++
+      minx = Math.min(minx, x)
+      maxx = Math.max(maxx, x)
+      miny = Math.min(miny, y)
+      maxy = Math.max(maxy, y)
+    }
+  }
+  if (!land) return 0
+  return land / ((maxx - minx + 1) * (maxy - miny + 1))
+}
+
 /** Drown tiny islands and fill pinholes so continents stay continents. */
 export function cohereLand(
   elev: Float32Array,
@@ -224,4 +248,112 @@ export function cohereLand(
       for (const c of cells) elev[c] = Math.max(elev[c], sea + 0.04)
     }
   }
+}
+
+function countLand(elev: Float32Array, sea: number): number {
+  let n = 0
+  for (let i = 0; i < elev.length; i++) if (elev[i] >= sea) n++
+  return n
+}
+
+/** Keep a handful of real landmasses; drown the green pimples around them. */
+export function drownOffshoreSpeckle(world: World): void {
+  const mass = clampContinentMass(world.continentMass)
+  if (mass === 'islands') return
+  const { width: w, height: h, elev, seaLevel: sea } = world
+  const comps = landComponents(world)
+  if (!comps.length) return
+  comps.sort((a, b) => b.length - a.length)
+  const keepN = mass === 'continents' ? 3 : 8
+  const minSize = Math.max(
+    mass === 'continents' ? 48 : 18,
+    Math.round(w * h * (mass === 'continents' ? 0.005 : 0.0015)),
+  )
+  const keep = new Uint8Array(w * h)
+  let kept = 0
+  for (const cells of comps) {
+    const must = kept < (mass === 'continents' ? 2 : 1)
+    if (kept >= keepN) break
+    if (!must && cells.length < minSize) continue
+    for (const i of cells) keep[i] = 1
+    kept++
+  }
+  if (!kept) {
+    for (const i of comps[0]) keep[i] = 1
+  }
+  for (let i = 0; i < elev.length; i++) {
+    if (elev[i] >= sea && !keep[i]) elev[i] = Math.min(elev[i], sea - 0.06)
+  }
+}
+
+/** Grow or nibble coasts until the land share matches the slider — without new islands. */
+export function fitCoastalLandRatio(world: World): void {
+  const target = Math.max(0.12, Math.min(0.72, world.landRatio))
+  const { width: w, height: h, elev, seaLevel: sea, seed } = world
+  const nCells = w * h
+  const want = Math.round(target * nCells)
+
+  for (let pass = 0; pass < 48; pass++) {
+    const have = countLand(elev, sea)
+    if (Math.abs(have - want) <= Math.max(12, nCells * 0.012)) break
+    const grow = have < want
+    const candidates: number[] = []
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x
+        const isLand = elev[i] >= sea
+        if (grow === isLand) continue
+        let nLand = 0
+        for (const [dx, dy] of DIRS) {
+          const nx = wrapX(x + dx, w)
+          const ny = y + dy
+          if (ny < 0 || ny >= h) continue
+          if (elev[ny * w + nx] >= sea) nLand++
+        }
+        if (grow && nLand === 0) continue
+        if (!grow && nLand === 4) continue
+        if (grow && nLand < 1) continue
+        candidates.push(i)
+      }
+    }
+    if (!candidates.length) break
+    const need = Math.abs(want - have)
+    const batch = Math.min(
+      Math.max(4, Math.round(candidates.length * 0.12)),
+      Math.max(6, Math.round(need * 0.28)),
+    )
+    candidates.sort((a, b) => {
+      const ax = a % w
+      const ay = (a / w) | 0
+      const bx = b % w
+      const by = (b / w) | 0
+      return (
+        fbm(ax / 16, ay / 13, seed + 29 + pass, 3) - fbm(bx / 16, by / 13, seed + 29 + pass, 3)
+      )
+    })
+    for (let k = 0; k < batch; k++) {
+      const i = candidates[k]
+      const x = i % w
+      const y = (i / w) | 0
+      const n = fbm(x / 9, y / 8, seed + 41, 3)
+      if (grow) elev[i] = sea + 0.03 + n * 0.05
+      else elev[i] = Math.min(elev[i], sea - 0.04 - n * 0.04)
+    }
+  }
+}
+
+/**
+ * Full continents means a few large masses, even at a wet land/water mix.
+ * Island world is the only mode that keeps speckles.
+ */
+export function reshapeLandmasses(world: World): void {
+  const mass = clampContinentMass(world.continentMass)
+  if (mass === 'islands') return
+  drownOffshoreSpeckle(world)
+  fitCoastalLandRatio(world)
+  meanderCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 19)
+  chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21)
+  chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 37)
+  drownOffshoreSpeckle(world)
+  fitCoastalLandRatio(world)
 }

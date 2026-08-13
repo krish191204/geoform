@@ -7,6 +7,7 @@ import {
   cohereLand,
   DEFAULT_CONTINENT_MASS,
   massRecipe,
+  reshapeLandmasses,
   type ContinentMass,
 } from './mass'
 import { createRng, fbm } from './noise'
@@ -280,6 +281,7 @@ export function generateWorld(
   }
 
   applyLandRatio(world, land)
+  reshapeLandmasses(world)
   cohereLand(world.elev, width, height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
   for (let p = 0; p < recipe.chewPasses; p++) {
     chewStraightCoasts(world.elev, width, height, world.seaLevel, seed + p * 9)

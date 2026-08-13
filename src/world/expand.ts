@@ -86,11 +86,19 @@ function generatePadElev(
     fbm(gx / 48, gy / 48, seed, 5) * 0.55 + fbm(gx / 18, gy / 18, seed + 7, 3) * 0.25
   const coast = (fbm(gx / 14, gy / 14, seed + 41, 4) - 0.5) * 0.08
   let e = 0.08 + n * 0.12 + coast
+  if (mass === 'continents') {
+    const ridge = fbm(gx / 52, gy / 40, seed + 13, 5)
+    const thresh = 0.78 - land * 0.16
+    if (ridge > thresh) {
+      const t = (ridge - thresh) / Math.max(0.08, 1 - thresh)
+      e = sea + 0.05 + t * 0.24 + n * 0.1
+    }
+    return clamp(e, 0, 1)
+  }
   const blob = fbm(gx / 30, gy / 26, seed + 13, 5)
   const island = fbm(gx / 11, gy / 11, seed + 99, 4)
-  const continentThresh = mass === 'continents' ? 1.22 - land * 0.18 : 1.14 - land * 0.28
-  const islandThresh =
-    mass === 'islands' ? 0.82 - land * 0.2 : mass === 'mixed' ? 0.9 - land * 0.16 : 0.97 - land * 0.1
+  const continentThresh = 1.14 - land * 0.28
+  const islandThresh = mass === 'islands' ? 0.82 - land * 0.2 : 0.9 - land * 0.16
   if (blob > continentThresh) {
     const t = (blob - continentThresh) / Math.max(0.08, 1 - continentThresh)
     e = sea + 0.04 + t * 0.26 + n * 0.12
@@ -193,8 +201,12 @@ export function expandWorld(
         const blend = 1 - smoothstep(1, Math.max(8, warpAmp * 0.8), sd)
         if (blend > 0.02) {
           const near = oldElev[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
-          const shelfMix = blend * blend * 0.18
-          e = e * (1 - shelfMix) + Math.min(near, sea - 0.03) * shelfMix
+          if (mass !== 'islands' && near >= sea) {
+            e = e * (1 - blend * 0.62) + near * blend * 0.62
+          } else {
+            const shelfMix = blend * blend * 0.18
+            e = e * (1 - shelfMix) + Math.min(near, sea - 0.03) * shelfMix
+          }
         }
       }
 

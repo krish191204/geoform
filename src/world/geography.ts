@@ -1,7 +1,7 @@
 import { ensureDrainage, recomputeDerived } from './climate'
-import { chewStraightCoasts } from './coasts'
+import { chewStraightCoasts, meanderCoasts } from './coasts'
 import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './land'
-import { clampContinentMass, cohereLand, landmassStats, massRecipe } from './mass'
+import { clampContinentMass, cohereLand, drownOffshoreSpeckle, fitCoastalLandRatio, landmassStats, massRecipe, reshapeLandmasses } from './mass'
 import { createRng, fbm } from './noise'
 import type { World } from './types'
 
@@ -135,23 +135,39 @@ export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void 
     applyLandRatio(world, world.landRatio)
   }
   const mass = clampContinentMass(world.continentMass)
+  if (mass !== 'islands') reshapeLandmasses(world)
   const recipe = massRecipe(mass)
   for (let pass = 0; pass < 4; pass++) {
     const stats = landmassStats(world)
     let changed = false
-    if (mass !== 'islands' && stats.speckleShare > 0.16) {
-      cohereLand(world.elev, world.width, world.height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
-      changed = true
-    }
     if (stats.axisAlignedCoastShare > 0.28) {
       chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21 + pass * 13)
       chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 37 + pass * 17)
+      meanderCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 11 + pass * 5)
+      if (mass !== 'islands') {
+        drownOffshoreSpeckle(world)
+        fitCoastalLandRatio(world)
+      }
+      changed = true
+    }
+    if (mass !== 'islands' && (stats.speckleShare > 0.08 || stats.components > 10)) {
+      cohereLand(world.elev, world.width, world.height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
+      drownOffshoreSpeckle(world)
+      fitCoastalLandRatio(world)
       changed = true
     }
     if (!changed) break
   }
+  if (mass !== 'islands') {
+    drownOffshoreSpeckle(world)
+    fitCoastalLandRatio(world)
+  }
   if (opts?.sculpt) sculptOrogeny(world)
   ensureDrainage(world)
+  if (mass !== 'islands') {
+    drownOffshoreSpeckle(world)
+    fitCoastalLandRatio(world)
+  }
   relocateOceanCities(world)
   recomputeDerived(world)
 }
