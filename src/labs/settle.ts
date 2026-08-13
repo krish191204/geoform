@@ -1,3 +1,7 @@
+/**
+ * Lab 05 — where cities want to live. Same suitability rules as the editor:
+ * not ocean, not a peak, not a desert, preferably near a river or coast.
+ */
 import { approach, ambientPhase, EASE, prefersReducedMotion } from './motion'
 import {
   clamp,

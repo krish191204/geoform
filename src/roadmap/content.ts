@@ -1,3 +1,8 @@
+/**
+ * Copy for the roadmap page.
+ * SHIPPED = already in the editor (local atlas, full continents, silent repair).
+ * STAGES / PHASES = future work. Do not confuse a wish with a feature.
+ */
 export type StageId =
   | 'ingest'
   | 'stage'

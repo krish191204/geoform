@@ -1,3 +1,14 @@
+/**
+ * Undo / redo.
+ *
+ * Before a brush stroke we push a snapshot (copy of height, plates, cities,
+ * size, land settings). Undo restores that snapshot. Redo is the opposite stack.
+ *
+ * Size is in the snapshot because zoom-out changes width/height. Restoring
+ * an old stroke must put the old arrays back, not write into the new size.
+ *
+ * MAX = 40 strokes. Older ones fall off the front.
+ */
 import type { City, World } from './types'
 import { cloneCities, cloneElev, clonePlateId, ensureDerived } from './tools'
 
@@ -22,6 +33,7 @@ export interface HistoryEntry {
 
 const MAX = 40
 
+/** Photograph the world as it is now. */
 function snapshot(world: World, label: string): HistoryEntry {
   return {
     elev: cloneElev(world.elev),
@@ -43,6 +55,7 @@ function snapshot(world: World, label: string): HistoryEntry {
   }
 }
 
+/** Copy a snapshot back onto the live world. */
 function restore(world: World, entry: HistoryEntry): void {
   world.width = entry.width
   world.height = entry.height
@@ -71,6 +84,7 @@ export class EditHistory {
     this.redoStack = []
   }
 
+  /** Call this BEFORE you change the world. label is what the UI shows ("Raise", etc). */
   push(world: World, label: string): void {
     this.undoStack.push(snapshot(world, label))
     if (this.undoStack.length > MAX) this.undoStack.shift()

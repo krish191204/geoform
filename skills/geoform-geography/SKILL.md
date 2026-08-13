@@ -5,6 +5,8 @@ description: Geography accuracy rules for Geoform — Earth calibration vs criti
 
 # Geoform geography skill
 
+If you are reading the code for the first time, start at the repo root: `HOW_IT_WORKS.md`, then `src/world/types.ts`.
+
 ## Hard rules
 
 1. **Numbers come from grids + fitted models**, never from an LLM inventing precip/temp.

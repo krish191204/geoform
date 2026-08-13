@@ -1,3 +1,15 @@
+/**
+ * Make coasts look like shores, not like someone drew a rectangle.
+ *
+ * chewStraightCoasts: if a shoreline is a perfect N-S or E-W line, nibble
+ *   random bites into capes and inlets.
+ * meanderCoasts: push the shoreline around with noise so continents are not boxes.
+ * noisyPolarOcean: fade land into ocean near the poles with a wiggly edge,
+ *   not a hard rectangular frame.
+ *
+ * We copy into `next` then write back so we do not chew a cell using a
+ * neighbor we already chewed this pass.
+ */
 import { fbm } from './noise'
 
 const idx = (w: number, x: number, y: number) => y * w + x

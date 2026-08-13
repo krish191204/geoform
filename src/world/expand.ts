@@ -1,3 +1,14 @@
+/**
+ * Zoom-out used to just CSS-shrink the canvas (postage stamp on a grey desk).
+ * Now it adds real cells around the map so the world grows.
+ *
+ * padsForZoomOut: how many cells to add on each side so the map still fills
+ *   the view, without going past 640×320.
+ * expandWorld: copy the old grid into the middle, invent new height around
+ *   the edges that matches the landmass style, scoot cities, chew the new coasts.
+ *
+ * originX/originY shift so climate latitude stays put (equator does not jump).
+ */
 import { classifyBiome } from './climate'
 import { chewStraightCoasts } from './coasts'
 import { clampLandRatio } from './land'
@@ -19,7 +30,7 @@ function smoothstep(edge0: number, edge1: number, x: number) {
   return t * t * (3 - 2 * t)
 }
 
-/** Negative inside the old rect, positive outside. */
+/** Negative inside the old map, positive outside. Used to blend new pad cells into the old coast. */
 function signedRectDist(ox: number, oy: number, ow: number, oh: number): number {
   if (ox >= 0 && oy >= 0 && ox < ow && oy < oh) {
     return -Math.min(ox + 0.5, oy + 0.5, ow - 0.5 - ox, oh - 0.5 - oy)
@@ -74,6 +85,7 @@ export function padsForZoomOut(
   }
 }
 
+/** Invent height for a new pad cell. Continents mode prefers big blobs, not speckle. */
 function generatePadElev(
   gx: number,
   gy: number,
@@ -108,6 +120,10 @@ function generatePadElev(
   return clamp(e, 0, 1)
 }
 
+/**
+ * Grow the grid. Returns false if we are already at max size or pads are zero.
+ * Cities move with the old rectangle so they stay on the same land.
+ */
 export function expandWorld(
   world: World,
   padLeft: number,
@@ -169,9 +185,9 @@ export function expandWorld(
       const gen = generatePadElev(gx, gy, seed, sea, land, mass)
       const edgePlate = oldPlate[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
 
-      let e: number
-      let plate = edgePlate
-      let copied = false
+      // Deep inside the old map: copy height as-is.
+      // Near the old edge: chew the coast so the seam is not a rectangle.
+      // Outside: invent new height, blend toward nearby land if we want continents.
 
       if (inside && sd < copyDepth) {
         const oi = idx(ow, ox, oy)

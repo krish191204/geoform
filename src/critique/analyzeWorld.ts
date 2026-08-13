@@ -1,3 +1,8 @@
+/**
+ * Grade a Geoform save (the JSON from Save). Looks at land shape, climate,
+ * rivers, cities. This is the "teacher's red pen." The editor does not use
+ * this — it repairs instead of nagging.
+ */
 import type { CritiqueResult, MapIssue, Severity } from './types'
 import { landBboxFill, landmassStats } from '../world/mass'
 

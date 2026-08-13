@@ -1,9 +1,20 @@
+/**
+ * Optional second engine: Mindwerks WorldEngine (Python/WASM behind /api).
+ *
+ * Default is Local (generate.ts). Only use this if the dropdown says WorldEngine
+ * AND the API is actually running. If WASM is missing, the editor stays on Local.
+ *
+ * worldFromPayload copies JSON grids into our World shape.
+ * fetchWorldEngineWorld asks the server for a new map.
+ * recomputeWorldEngine sends your painted heights back for climate.
+ */
 import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
 import { ensurePlateMotion } from './geography'
 import { landFraction } from './land'
 import { DEFAULT_CONTINENT_MASS } from './mass'
 
+/** Copy a WorldEngine JSON payload into our in-memory World. */
 export function worldFromPayload(
   payload: WorldEnginePayload,
   keepCities: World['cities'] = [],
@@ -51,6 +62,7 @@ export function worldFromPayload(
   return world
 }
 
+/** Ask the optional backend for a brand-new map. Throws if the API is down. */
 export async function fetchWorldEngineWorld(
   seed: number,
   width: number,
@@ -70,6 +82,7 @@ export async function fetchWorldEngineWorld(
   return worldFromPayload(payload)
 }
 
+/** Send painted heights to WorldEngine and get climate/rivers/biomes back. */
 export async function recomputeWorldEngine(world: World): Promise<World> {
   const res = await fetch('/api/recompute', {
     method: 'POST',

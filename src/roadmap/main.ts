@@ -1,3 +1,8 @@
+/**
+ * Roadmap page (`/roadmap.html`). What already shipped vs what is still a wish.
+ * SHIPPED in content.ts is the honest "this works today" list. Stages below
+ * that are future Earth-calibration work, not the current editor.
+ */
 import './style.css'
 import { navHtml } from '../chrome/nav'
 import {

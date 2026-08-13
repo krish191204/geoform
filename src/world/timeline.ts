@@ -1,3 +1,13 @@
+/**
+ * Deep-time slider: "what did this planet look like N million years ago?"
+ *
+ * Present (age 0) is the map you edit. The past is a *copy* we reconstruct by
+ * sliding plates backward and gathering land toward a supercontinent. We do
+ * not overwrite your present map. Cities vanish on old ages (they had not
+ * been founded yet).
+ *
+ * This is a sketch, not a geology thesis. MAX_AGE_MA = 200 million years.
+ */
 import { recomputeDerived } from './climate'
 import { ensurePlateMotion } from './geography'
 import { fbm } from './noise'
@@ -11,6 +21,7 @@ function wrapX(x: number, w: number): number {
   return ((x % w) + w) % w
 }
 
+/** Copy the World shell with empty arrays — we fill height next. */
 function cloneShell(world: World): World {
   const n = world.width * world.height
   return {
@@ -28,6 +39,7 @@ function cloneShell(world: World): World {
   }
 }
 
+/** Average (x, y) of all land cells — "where is the middle of the land?" */
 function landCentroid(world: World): { x: number; y: number } {
   const { width: w, height: h, elev, seaLevel } = world
   let x = 0

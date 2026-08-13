@@ -1,3 +1,8 @@
+/**
+ * 3D globe view. Same World arrays, wrapped onto a sphere with Three.js.
+ * Color and bump textures are baked from draw.ts. Spin with the mouse.
+ * This is a skin on the same numbers — it does not generate a second planet.
+ */
 import * as THREE from 'three'
 import { bakeBumpImageData, bakeWorldImageData, type MapLook } from './draw'
 import type { World } from '../world/types'

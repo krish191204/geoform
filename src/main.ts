@@ -1,3 +1,18 @@
+/**
+ * Map editor page (`/`). This is the big one.
+ *
+ * Mental model:
+ *  - `world` is the planet (arrays). Null until boot finishes.
+ *  - `history` is undo/redo snapshots.
+ *  - `renderer` draws the canvas from those arrays.
+ *  - Buttons mutate `world`, then we redraw.
+ *
+ * Default engine is Local (browser). WorldEngine is the optional dropdown.
+ * Typical size: 320×160. Zoom-out adds real cells (expand.ts), it does not
+ * CSS-shrink the picture.
+ *
+ * If you are lost, open HOW_IT_WORKS.md then src/world/types.ts.
+ */
 import './style.css'
 import { navHtml } from './chrome/nav'
 import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
@@ -42,6 +57,8 @@ const WIDTH = 320
 const HEIGHT = 160
 
 type EngineChoice = 'local' | 'worldengine'
+
+// --- live editor state (one planet, one brush, one view) ---
 
 const TERRAIN_TOOLS: Tool[] = [
   'raise',
@@ -94,6 +111,7 @@ let raf = 0
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
+/** Debounced write to localStorage. Another computer will not see this. */
 function scheduleAutosave() {
   if (!world) return
   if (autosaveTimer !== null) window.clearTimeout(autosaveTimer)
@@ -112,6 +130,7 @@ function setStatus(msg: string) {
   if (el) el.textContent = status
 }
 
+/** Swap in a new planet (New world, Load, undo). Reset the deep-time slider to Present. */
 function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
@@ -145,6 +164,7 @@ function resetView() {
   applyViewTransform()
 }
 
+/** Size the canvas so the whole grid fits in the map pane (letterbox is UI, not ocean). */
 function fitAtlasCanvas() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   const vp = document.querySelector<HTMLElement>('#mapViewport')
@@ -180,6 +200,7 @@ function isLayerLook(look: MapLook): look is Layer {
   return look !== 'satellite' && look !== 'night'
 }
 
+/** Atlas = 2D map. Planet = 3D globe of the same arrays. */
 function setViewMode(mode: 'atlas' | 'planet') {
   viewMode = mode
   const map = document.querySelector<HTMLCanvasElement>('#map')
@@ -273,6 +294,7 @@ function syncLandRatioUi() {
   if (waterEl) waterEl.textContent = String(100 - pct)
 }
 
+/** Present map, or a reconstructed past if the Age slider is not 0. */
 function displayWorld(): World | null {
   if (timelineAge > 0.5 && timelineView) return timelineView
   return world
@@ -343,6 +365,10 @@ function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number }
   }
 }
 
+/**
+ * Zoom-out: add real cells around the map so it still fills the view.
+ * If we are already at 640×320 we just zoom the camera instead.
+ */
 function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   if (!world || busy || strokeActive || factor >= 1) return false
   const vp = document.querySelector<HTMLElement>('#mapViewport')
@@ -497,6 +523,7 @@ function askNewWorld(run: () => void) {
   banner.querySelector('#confirmCancel')?.addEventListener('click', hideConfirm)
 }
 
+/** Build the HTML chrome (buttons, sliders). Called once at boot, then we patch bits. */
 function renderShell() {
   const worldTrailing = `
     <div class="nav-trailing">
@@ -621,6 +648,7 @@ function renderShell() {
   void boot()
 }
 
+/** Is the optional WorldEngine Python API up? If not, we stay on Local. */
 async function apiHealthy(): Promise<boolean> {
   try {
     const res = await fetch('/health', { cache: 'no-store' })
@@ -640,6 +668,7 @@ function hideApiDown() {
   }
 }
 
+/** New world using the TypeScript generator. Always works offline. */
 function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
   setStatus('Generating local world…')
@@ -659,6 +688,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   }
 }
 
+/** First paint: restore autosave if this browser has one, else generate a new seed. */
 async function boot() {
   hideApiDown()
   engineChoice = 'local'
@@ -691,6 +721,7 @@ function setBusy(on: boolean, message?: string) {
   })
 }
 
+/** New world: Local generator, or WorldEngine if you picked that dropdown and the API is up. */
 async function loadWorld(nextSeed: number) {
   if (engineChoice !== 'worldengine') {
     loadLocalWorld(nextSeed)
@@ -718,6 +749,7 @@ async function loadWorld(nextSeed: number) {
   }
 }
 
+/** After painting, wait a beat then rebuild climate/rivers. Immediate = no wait. */
 function scheduleClimateRecompute(immediate = false) {
   if (!world) return
   if (recomputeTimer !== null) window.clearTimeout(recomputeTimer)
@@ -764,6 +796,7 @@ function scheduleClimateRecompute(immediate = false) {
   else recomputeTimer = window.setTimeout(() => void run(), 160)
 }
 
+/** Snapshot undo BEFORE the stroke. One undo undoes the whole drag, not each pixel. */
 function beginStroke(label: string) {
   if (!world || strokeActive) return
   history.push(world, label)
@@ -859,6 +892,7 @@ const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'continent', label: 'Add continent', desc: 'New landmass; plates rewrite', key: 'C' },
 ]
 
+/** Mouse / keyboard / slider wiring. This is most of the page's behavior. */
 function bind() {
   const tools = document.querySelector('#tools')!
   tools.innerHTML = TOOL_DEFS.map(
@@ -1390,6 +1424,7 @@ function startLoop() {
   raf = requestAnimationFrame(tick)
 }
 
+/** Fewer pixels on huge grids so the canvas stays snappy. */
 function rasterScale(w: World): number {
   const cells = w.width * w.height
   if (cells > 160_000) return 2
@@ -1397,6 +1432,7 @@ function rasterScale(w: World): number {
   return 4
 }
 
+/** Draw the current world onto the canvas. Called every animation frame while dirty. */
 function paint() {
   const src = displayWorld()
   if (!src) return

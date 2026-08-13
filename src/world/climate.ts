@@ -1,7 +1,24 @@
+/**
+ * Weather, rivers, biomes, and "can a city live here?"
+ *
+ * Nothing in this file invents land. It only *reads* height + sea level and
+ * writes temp, rain, river flux, biome labels, and suitability.
+ *
+ * Temperature: hot at the equator, cold at the poles, colder up mountains
+ *   (lapse rate — air cools as it rises).
+ * Rain: pretend wind blows west → east along each row. Ocean loads the air
+ *   with moisture. When air hits a slope (orography) it dumps rain, then
+ *   the far side is a desert (rain shadow).
+ * Rivers: every land cell pours into its lowest neighbor. Flux is "how many
+ *   upstream cells dumped on me." We wrap X so a river can cross the date line.
+ * Drainage: if a cell has no downhill path to the sea, we cut a tiny canyon
+ *   toward the ocean so rivers never sit in a closed bowl.
+ */
 import type { Biome, SuitabilityResult, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
 
+/** Pick a biome name from height + warmth + wetness. Ocean first, then ice, then plants. */
 export function classifyBiome(elev: number, sea: number, temp: number, moist: number): Biome {
   if (elev < sea) return elev > sea - 0.03 ? 'coast' : 'ocean'
   if (elev > 0.78) return 'alpine'
@@ -14,11 +31,16 @@ export function classifyBiome(elev: number, sea: number, temp: number, moist: nu
   return 'grassland'
 }
 
+/**
+ * Latitude 0 = north pole, 0.5 = equator, 1 = south pole.
+ * Uses originY + latRows so zoom-out padding does not move the equator.
+ */
 function climateLat(world: World, y: number): number {
   const span = Math.max(1, world.latRows - 1)
   return Math.max(0, Math.min(1, (y + world.originY) / span))
 }
 
+/** Fill temp[] and moist[] from the heightfield. Call after you change elev. */
 export function recomputeClimate(world: World): void {
   const { width: w, height: h, elev, seaLevel, temp, moist } = world
 
@@ -64,6 +86,7 @@ export function recomputeClimate(world: World): void {
   }
 }
 
+/** Cardinal neighbors only (no diagonals). Flood-fill uses this so blobs stay 4-connected. */
 const CARDINAL = [
   [1, 0],
   [-1, 0],
@@ -71,6 +94,7 @@ const CARDINAL = [
   [0, -1],
 ] as const
 
+/** All 8 neighbors. Rivers can flow diagonally too (D8). */
 const FLOW_DIRS = [
   [1, 0],
   [-1, 0],
@@ -82,7 +106,11 @@ const FLOW_DIRS = [
   [-1, -1],
 ] as const
 
-/** Cut a downhill path to the sea so rivers never sit in closed basins. */
+/**
+ * Closed bowls trap rivers. Walk from the ocean inland (distance-to-sea),
+ * then from the far cells back: if a cell has no downhill neighbor, nick the
+ * next cell toward the sea so water can escape. We wrap X. We do not wrap Y.
+ */
 export function ensureDrainage(world: World): void {
   const { width: w, height: h, elev, seaLevel } = world
   const dist = new Int32Array(w * h)
@@ -131,11 +159,17 @@ export function ensureDrainage(world: World): void {
     }
     if (hasDown || next < 0) continue
     if (elev[next] >= elev[i] && elev[next] >= seaLevel) {
+      // Lower the downhill cell just enough that water can leave. Stay near sea if we hit the coast.
       elev[next] = Math.max(seaLevel - 0.02, elev[i] - 0.004)
     }
   }
 }
 
+/**
+ * River map: start every land cell with a trickle, then pour downhill from
+ * the highest cells so tributaries add up. Ocean cells are skipped.
+ * X wraps (cylinder). Y does not (poles).
+ */
 export function recomputeHydrology(world: World): void {
   const { width: w, height: h, elev, seaLevel, flux } = world
   flux.fill(0.01)
@@ -167,6 +201,7 @@ export function recomputeHydrology(world: World): void {
   }
 }
 
+/** Stamp a biome label on every cell. */
 export function recomputeBiomes(world: World): void {
   const { width: w, height: h, elev, seaLevel, temp, moist, biome } = world
   for (let i = 0; i < w * h; i++) {
@@ -174,6 +209,7 @@ export function recomputeBiomes(world: World): void {
   }
 }
 
+/** How steep is this cell vs its neighbors. Steep = bad for a city. */
 function slopeAt(world: World, x: number, y: number): number {
   const { width: w, height: h, elev } = world
   const e = elev[idx(w, x, y)]
@@ -190,6 +226,10 @@ function slopeAt(world: World, x: number, y: number): number {
   return maxD
 }
 
+/**
+ * Can people farm and drink here? Ocean = no. Peak = no. Desert / ice = bad.
+ * Near a river or coast = good. This is why cities refuse to sit on water.
+ */
 export function evaluateSuitability(world: World, x: number, y: number): SuitabilityResult {
   const { width: w, elev, seaLevel, moist, flux, biome, temp } = world
   const i = idx(w, x, y)
@@ -297,6 +337,7 @@ export function evaluateSuitability(world: World, x: number, y: number): Suitabi
   return { score, ok, reasons }
 }
 
+/** Fill suitability[] for the whole map (the "where cities want to be" layer). */
 export function recomputeSuitability(world: World): void {
   const { width: w, height: h, suitability } = world
   for (let y = 0; y < h; y++) {
@@ -306,6 +347,11 @@ export function recomputeSuitability(world: World): void {
   }
 }
 
+/**
+ * Rebuild everything that is *not* height: climate, rivers, biomes, cities-layer.
+ * Height is the cause. These arrays are the effects. After a brush stroke we
+ * often skip suitability until the stroke ends (it is slower).
+ */
 export function recomputeDerived(world: World, includeSuitability = true): void {
   recomputeClimate(world)
   recomputeHydrology(world)

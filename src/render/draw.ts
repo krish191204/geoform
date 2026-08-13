@@ -1,3 +1,11 @@
+/**
+ * Draw the 2D atlas. One canvas pixel (after scale) = one world cell.
+ *
+ * We walk every cell, pick a color from height / biome / rain / whatever
+ * layer is selected, put it in an ImageData, and blit it. Cities are dots
+ * on top. The CSS object-fit: contain letterbox around the canvas is UI
+ * chrome — not ocean. Ocean is only cells whose height is below sea level.
+ */
 import { biomeColor, type Layer, type World } from '../world/types'
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -201,6 +209,7 @@ function cellColor(
   return rgb
 }
 
+/** Which coloring the 2D map (and globe bake) uses. Satellite / night are extra looks, not extra data. */
 export type MapLook = Layer | 'satellite' | 'night'
 
 function satelliteColor(world: World, x: number, y: number): [number, number, number] {
@@ -341,6 +350,11 @@ function hashWorld(world: World): string {
   return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
 }
 
+/**
+ * Paints the atlas canvas from World arrays.
+ * We cache the last bitmap so we only redraw cells when height/climate changed.
+ * scale drops 4→3→2 on huge grids so zoom-out stays fast.
+ */
 export class MapRenderer {
   private cacheKey = ''
   private base: ImageData | null = null
@@ -597,6 +611,7 @@ export function clientToContainedBitmap(
   return { nx, ny }
 }
 
+/** Mouse pixel → world cell, accounting for the letterbox around a contain-fit canvas. */
 export function screenToCell(
   canvas: HTMLCanvasElement,
   clientX: number,

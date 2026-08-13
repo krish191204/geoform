@@ -1,3 +1,17 @@
+/**
+ * Continents vs islands — the "keep 2–3 blobs" logic.
+ *
+ * A landmass (component) is a blob of land cells that touch each other
+ * (left/right wrap, no wrap at the poles). A speckle is a tiny blob.
+ *
+ * Full continents: drown everything except the biggest 2–3 masses, then
+ * grow or nibble *existing coasts* until Land % is close. We never sprinkle
+ * new islands to hit the number — that looked like green acne on blue.
+ *
+ * Island world: skip all of that. Speckles are the point.
+ *
+ * Mixed: keep more blobs than continents, fewer than islands.
+ */
 import { fbm } from './noise'
 import { chewStraightCoasts, meanderCoasts } from './coasts'
 import type { World } from './types'
@@ -29,20 +43,25 @@ export function clampContinentMass(value: unknown): ContinentMass {
   return DEFAULT_CONTINENT_MASS
 }
 
+/** Knobs the generator uses so "Full continents" is actually big blobs. */
 export interface MassRecipe {
   plateMin: number
   plateSpan: number
   contMin: number
   contMax: number
+  /** How fat a continental plate's land blob is. Bigger = fatter continents. */
   radiusScale: number
   gulfThresh: number
   gulfCut: number
   islandThresh: number
+  /** Drown land blobs this small or smaller (cell count). 0 = keep speckles. */
   speckleMax: number
+  /** Fill inland lakes this small. Big lakes stay. */
   pondMax: number
   chewPasses: number
 }
 
+/** Look up the knobs for the dropdown choice. */
 export function massRecipe(mass: ContinentMass): MassRecipe {
   if (mass === 'islands') {
     return {
@@ -96,10 +115,15 @@ const DIRS = [
   [0, -1],
 ] as const
 
+/** Wrap longitude: walk off the right, appear on the left. */
 function wrapX(x: number, w: number) {
   return ((x % w) + w) % w
 }
 
+/**
+ * Flood fill: gather every connected cell that is the same land/water as start.
+ * Used to find "this is one continent" vs "this is a lonely island".
+ */
 function flood(
   elev: Float32Array,
   w: number,
@@ -132,6 +156,7 @@ function flood(
   return cells
 }
 
+/** Every separate land blob, each as a list of cell indexes. Biggest first after you sort. */
 export function landComponents(world: Pick<World, 'width' | 'height' | 'elev' | 'seaLevel'>): number[][] {
   const { width: w, height: h, elev, seaLevel: sea } = world
   const seen = new Uint8Array(w * h)
@@ -151,6 +176,10 @@ export interface LandmassStats {
   axisAlignedCoastShare: number
 }
 
+/**
+ * Quick census: how many blobs, how much of the land is the biggest one,
+ * how much is speckle, how ruler-straight the coasts look.
+ */
 export function landmassStats(
   world: Pick<World, 'width' | 'height' | 'elev' | 'seaLevel'>,
   speckleSize = 8,
@@ -250,6 +279,7 @@ export function cohereLand(
   }
 }
 
+/** How many cells are currently land. */
 function countLand(elev: Float32Array, sea: number): number {
   let n = 0
   for (let i = 0; i < elev.length; i++) if (elev[i] >= sea) n++
@@ -264,6 +294,7 @@ export function drownOffshoreSpeckle(world: World): void {
   const comps = landComponents(world)
   if (!comps.length) return
   comps.sort((a, b) => b.length - a.length)
+  // Continents: keep at most 3 blobs. Mixed: keep up to 8. Islands: we already returned.
   const keepN = mass === 'continents' ? 3 : 8
   const minSize = Math.max(
     mass === 'continents' ? 48 : 18,
@@ -273,6 +304,7 @@ export function drownOffshoreSpeckle(world: World): void {
   let kept = 0
   for (const cells of comps) {
     const must = kept < (mass === 'continents' ? 2 : 1)
+    // Always keep at least 2 continents even if they are small, so the map is not empty.
     if (kept >= keepN) break
     if (!must && cells.length < minSize) continue
     for (const i of cells) keep[i] = 1
@@ -310,8 +342,8 @@ export function fitCoastalLandRatio(world: World): void {
           if (ny < 0 || ny >= h) continue
           if (elev[ny * w + nx] >= sea) nLand++
         }
-        if (grow && nLand === 0) continue
-        if (!grow && nLand === 4) continue
+    if (grow && nLand === 0) continue // do not sprout a new island in open ocean
+    if (!grow && nLand === 4) continue // inland cell is not a coast
         if (grow && nLand < 1) continue
         candidates.push(i)
       }

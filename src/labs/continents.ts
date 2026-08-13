@@ -1,3 +1,9 @@
+/**
+ * Lab 06 — Full continents vs islands.
+ * Same generateWorld as the map editor. Switch the chips and watch speckles
+ * drown (continents) or stay (islands). Land % grows/shrinks coasts, it does
+ * not sprinkle new islands.
+ */
 import { generateWorld } from '../world/generate'
 import { landFraction } from '../world/land'
 import {

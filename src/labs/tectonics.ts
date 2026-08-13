@@ -1,3 +1,8 @@
+/**
+ * Lab 04 — plate edges. Converge = mountains. Diverge = rift / new sea.
+ * Transform = plates sliding past (less vertical drama). Same idea as
+ * sculptOrogeny in the editor, just one boundary you can poke.
+ */
 import { approach, ambientPhase, EASE, prefersReducedMotion } from './motion'
 import { clamp, drawAtmosphere, resizeCanvas, softNoise, type StopFn } from './shared'
 

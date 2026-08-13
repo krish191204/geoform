@@ -1,3 +1,7 @@
+/**
+ * Draw the critique preview: the map image plus pins on issues.
+ * Clicking a pin in the list highlights it here.
+ */
 import type { CritiqueResult, MapIssue } from './types'
 
 export function drawCritiquePreview(
