@@ -564,6 +564,11 @@ button.primary:hover {
   margin: 0 0 0.85rem;
 }
 
+.geo-flags:empty {
+  display: none;
+  margin: 0;
+}
+
 .geo-flag {
   padding: 0.55rem 0.65rem;
   border-radius: 8px;

@@ -64,25 +64,85 @@ export function recomputeClimate(world: World): void {
   }
 }
 
+const CARDINAL = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const
+
+const FLOW_DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+] as const
+
+/** Cut a downhill path to the sea so rivers never sit in closed basins. */
+export function ensureDrainage(world: World): void {
+  const { width: w, height: h, elev, seaLevel } = world
+  const dist = new Int32Array(w * h)
+  dist.fill(-1)
+  const q: number[] = []
+  for (let i = 0; i < w * h; i++) {
+    if (elev[i] < seaLevel) {
+      dist[i] = 0
+      q.push(i)
+    }
+  }
+  if (!q.length) return
+  for (let head = 0; head < q.length; head++) {
+    const i = q[head]
+    const x = i % w
+    const y = (i / w) | 0
+    for (const [dx, dy] of CARDINAL) {
+      const nx = (x + dx + w) % w
+      const ny = y + dy
+      if (ny < 0 || ny >= h) continue
+      const ni = idx(w, nx, ny)
+      if (dist[ni] >= 0) continue
+      dist[ni] = dist[i] + 1
+      q.push(ni)
+    }
+  }
+
+  for (let k = q.length - 1; k >= 0; k--) {
+    const i = q[k]
+    if (dist[i] <= 0) continue
+    const x = i % w
+    const y = (i / w) | 0
+    let hasDown = false
+    let next = -1
+    let nextDist = dist[i]
+    for (const [dx, dy] of CARDINAL) {
+      const nx = (x + dx + w) % w
+      const ny = y + dy
+      if (ny < 0 || ny >= h) continue
+      const ni = idx(w, nx, ny)
+      if (elev[ni] < elev[i] - 1e-6) hasDown = true
+      if (dist[ni] >= 0 && dist[ni] < nextDist) {
+        nextDist = dist[ni]
+        next = ni
+      }
+    }
+    if (hasDown || next < 0) continue
+    if (elev[next] >= elev[i] && elev[next] >= seaLevel) {
+      elev[next] = Math.max(seaLevel - 0.02, elev[i] - 0.004)
+    }
+  }
+}
+
 export function recomputeHydrology(world: World): void {
   const { width: w, height: h, elev, seaLevel, flux } = world
   flux.fill(0.01)
 
-  // Multiple passes of flow to lowest neighbor (simple, stable)
   const order: number[] = []
   for (let i = 0; i < w * h; i++) order.push(i)
   order.sort((a, b) => elev[b] - elev[a])
-
-  const dirs = [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-    [1, 1],
-    [1, -1],
-    [-1, 1],
-    [-1, -1],
-  ]
 
   for (const i of order) {
     const e = elev[i]
@@ -91,10 +151,10 @@ export function recomputeHydrology(world: World): void {
     const y = (i / w) | 0
     let best = -1
     let bestE = e
-    for (const [dx, dy] of dirs) {
-      const nx = x + dx
+    for (const [dx, dy] of FLOW_DIRS) {
+      const nx = (x + dx + w) % w
       const ny = y + dy
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      if (ny < 0 || ny >= h) continue
       const ni = idx(w, nx, ny)
       if (elev[ni] < bestE) {
         bestE = elev[ni]
@@ -103,8 +163,6 @@ export function recomputeHydrology(world: World): void {
     }
     if (best >= 0 && elev[best] >= seaLevel) {
       flux[best] += flux[i]
-    } else if (best >= 0) {
-      // drains to sea — keep flux on last land cell for river mouths
     }
   }
 }

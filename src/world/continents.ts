@@ -1,6 +1,5 @@
-import { recomputeDerived } from './climate'
 import { chewStraightCoasts } from './coasts'
-import { ensurePlateMotion, sculptOrogeny } from './geography'
+import { ensurePlateMotion, refreshGeography, sculptOrogeny } from './geography'
 import { fbm } from './noise'
 import type { World } from './types'
 
@@ -398,7 +397,7 @@ export function addContinent(
     return i >= 0 && i < elev.length && elev[i] >= seaLevel
   })
 
-  recomputeDerived(world)
+  refreshGeography(world, { sculpt: false })
   const label = CONTINENT_STYLES.find((s) => s.id === style)?.label ?? style
   return { ok: true, message: `Added ${label.toLowerCase()} — plates and neighboring coasts rewrote.` }
 }

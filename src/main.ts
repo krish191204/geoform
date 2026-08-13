@@ -31,7 +31,6 @@ import {
   DEFAULT_CONTINENT_MASS,
   type ContinentMass,
 } from './world/mass'
-import { flagImpossibleGeography } from './world/plausibility'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
@@ -126,10 +125,7 @@ function applyWorld(next: World, message: string) {
   syncLandRatioUi()
   syncMassUi()
   syncTimelineUi()
-  if (landFraction(next.elev, next.seaLevel) > 0.77) {
-    applyLandRatio(next, next.landRatio)
-  }
-  recomputeDerived(next)
+  refreshGeography(next, { sculpt: false })
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')
@@ -263,18 +259,7 @@ function syncMassUi() {
 function updateGeoFlags() {
   const el = document.querySelector('#geoFlags')
   if (!el) return
-  const src = displayWorld()
-  if (!src) {
-    el.innerHTML = ''
-    return
-  }
-  const flags = flagImpossibleGeography(src, continentMass)
-  el.innerHTML = flags
-    .map(
-      (f) =>
-        `<div class="geo-flag ${f.severity}"><strong>${escapeAttr(f.title)}</strong><span>${escapeAttr(f.detail)}</span></div>`,
-    )
-    .join('')
+  el.innerHTML = ''
 }
 
 function syncLandRatioUi() {
@@ -385,7 +370,7 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   timelineView = null
   syncTimelineUi()
   try {
-    refreshGeography(world, { sculpt: true })
+    refreshGeography(world, { sculpt: false })
   } catch {
     recomputeDerived(world)
   }
@@ -715,8 +700,8 @@ async function loadWorld(nextSeed: number) {
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
-    applyLandRatio(next, landRatio)
-    recomputeDerived(next)
+    next.landRatio = landRatio
+    next.continentMass = continentMass
     clearAutosave()
     applyWorld(next, `WorldEngine seed ${next.seed}`)
     hideApiDown()
@@ -758,6 +743,7 @@ function scheduleClimateRecompute(immediate = false) {
       if (gen !== recomputeGeneration) return
       // preserve history by mutating fields instead of applyWorld wipe
       world = next
+      refreshGeography(world, { sculpt: false })
       renderer.invalidate()
       setStatus('Climate updated.')
       setClimatePhase('idle')
@@ -766,7 +752,7 @@ function scheduleClimateRecompute(immediate = false) {
       scheduleAutosave()
     } catch {
       if (!world) return
-      recomputeDerived(world)
+      refreshGeography(world, { sculpt: false })
       renderer.invalidate()
       setStatus('Used local climate after backend failure.')
       setClimatePhase('idle')
@@ -795,7 +781,7 @@ function endStroke() {
     renderer.invalidate()
   }
   setClimatePhase('updating')
-  scheduleClimateRecompute()
+  scheduleClimateRecompute(true)
 }
 
 function updateHistoryButtons() {
@@ -815,7 +801,7 @@ function doUndo() {
   continentMass = clampContinentMass(world.continentMass)
   syncLandRatioUi()
   syncMassUi()
-  recomputeDerived(world)
+  refreshGeography(world, { sculpt: false })
   renderer.invalidate()
   updateCities()
   updateInspector()
@@ -835,7 +821,7 @@ function doRedo() {
   continentMass = clampContinentMass(world.continentMass)
   syncLandRatioUi()
   syncMassUi()
-  recomputeDerived(world)
+  refreshGeography(world, { sculpt: false })
   renderer.invalidate()
   updateCities()
   updateInspector()
@@ -1348,7 +1334,7 @@ function placeContinentAt(x: number, y: number) {
   updateHistoryButtons()
   scheduleAutosave()
   setClimatePhase('updating')
-  scheduleClimateRecompute()
+  scheduleClimateRecompute(true)
   setStatus(result.message)
 }
 

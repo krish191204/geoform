@@ -1,4 +1,7 @@
-import { recomputeDerived } from './climate'
+import { ensureDrainage, recomputeDerived } from './climate'
+import { chewStraightCoasts } from './coasts'
+import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './land'
+import { clampContinentMass, cohereLand, landmassStats, massRecipe } from './mass'
 import { createRng, fbm } from './noise'
 import type { World } from './types'
 
@@ -82,7 +85,77 @@ export function sculptOrogeny(world: World): void {
   }
 }
 
-export function refreshGeography(world: World, opts?: { sculpt?: boolean }): void {
+function ensureArrays(world: World): void {
+  const n = world.width * world.height
+  if (world.temp.length === n && world.biome.length === n && world.flux.length === n) return
+  world.temp = new Float32Array(n)
+  world.moist = new Float32Array(n)
+  world.flux = new Float32Array(n)
+  world.biome = new Array(n)
+  world.suitability = new Float32Array(n)
+}
+
+function relocateOceanCities(world: World): void {
+  const { width: w, height: h, elev, seaLevel } = world
+  for (const c of world.cities) {
+    if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h && elev[c.y * w + c.x] >= seaLevel) continue
+    let bestD = Infinity
+    let bx = c.x
+    let by = c.y
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (elev[y * w + x] < seaLevel) continue
+        const d = (x - c.x) * (x - c.x) + (y - c.y) * (y - c.y)
+        if (d < bestD) {
+          bestD = d
+          bx = x
+          by = y
+        }
+      }
+    }
+    if (bestD < Infinity) {
+      c.x = bx
+      c.y = by
+    }
+  }
+  world.cities = world.cities.filter(
+    (c) => c.x >= 0 && c.y >= 0 && c.x < w && c.y < h && elev[c.y * w + c.x] >= seaLevel,
+  )
+}
+
+/**
+ * Make the planet physically possible: seas, coasts, climate, rivers, plates.
+ * Call this instead of leaving broken geography for the user to notice.
+ */
+export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void {
+  ensureArrays(world)
+  ensurePlateMotion(world)
+  const frac = landFraction(world.elev, world.seaLevel)
+  if (frac > MAX_LAND_RATIO + 0.04 || frac < MIN_LAND_RATIO - 0.04) {
+    applyLandRatio(world, world.landRatio)
+  }
+  const mass = clampContinentMass(world.continentMass)
+  const recipe = massRecipe(mass)
+  for (let pass = 0; pass < 4; pass++) {
+    const stats = landmassStats(world)
+    let changed = false
+    if (mass !== 'islands' && stats.speckleShare > 0.16) {
+      cohereLand(world.elev, world.width, world.height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
+      changed = true
+    }
+    if (stats.axisAlignedCoastShare > 0.28) {
+      chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21 + pass * 13)
+      chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 37 + pass * 17)
+      changed = true
+    }
+    if (!changed) break
+  }
   if (opts?.sculpt) sculptOrogeny(world)
+  ensureDrainage(world)
+  relocateOceanCities(world)
   recomputeDerived(world)
+}
+
+export function refreshGeography(world: World, opts?: { sculpt?: boolean }): void {
+  harmonizeWorld(world, opts)
 }

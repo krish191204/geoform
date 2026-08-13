@@ -1,6 +1,6 @@
 import { recomputeDerived } from './climate'
 import { chewStraightCoasts, noisyPolarOcean } from './coasts'
-import { sculptOrogeny } from './geography'
+import { refreshGeography, sculptOrogeny } from './geography'
 import { applyLandRatio, clampLandRatio, DEFAULT_LAND_RATIO } from './land'
 import {
   clampContinentMass,
@@ -288,7 +288,7 @@ export function generateWorld(
   if (recipe.speckleMax > 0) {
     cohereLand(world.elev, width, height, world.seaLevel, Math.max(4, recipe.speckleMax - 6), 6)
   }
-  recomputeDerived(world)
+  refreshGeography(world, { sculpt: false })
   return world
 }
 

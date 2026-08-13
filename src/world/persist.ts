@@ -1,7 +1,6 @@
 import type { World } from './types'
-import { recomputeDerived } from './climate'
-import { ensurePlateMotion } from './geography'
-import { applyLandRatio, landFraction, MAX_LAND_RATIO } from './land'
+import { refreshGeography } from './geography'
+import { landFraction } from './land'
 import { clampContinentMass, DEFAULT_CONTINENT_MASS } from './mass'
 
 const STORAGE_KEY = 'geoform.autosave.v1'
@@ -97,11 +96,7 @@ export function deserializeWorld(data: SavedWorld): World {
   }
   world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
   world.continentMass = clampContinentMass(data.continentMass)
-  ensurePlateMotion(world)
-  if (landFraction(world.elev, world.seaLevel) > MAX_LAND_RATIO + 0.05) {
-    applyLandRatio(world, world.landRatio)
-  }
-  recomputeDerived(world)
+  refreshGeography(world, { sculpt: false })
   return world
 }
 
