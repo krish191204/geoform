@@ -289,7 +289,7 @@ function renderShell() {
 
         <p class="hint shortcuts">
           <strong>Paint</strong> drag · <strong>Pan</strong> Space+drag or middle mouse ·
-          <strong>Zoom</strong> scroll · <strong>Keys</strong> 1–0 tools, [ ] brush, Z undo
+          <strong>Zoom</strong> scroll · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
         </p>
       </aside>
 
