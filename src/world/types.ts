@@ -42,6 +42,8 @@ export interface World {
   height: number
   seed: number
   seaLevel: number
+  /** Target share of cells that should be land (the rest is water). */
+  landRatio: number
   plateId: Int16Array
   elev: Float32Array
   temp: Float32Array

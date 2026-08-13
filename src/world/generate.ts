@@ -1,5 +1,6 @@
-import { createRng, fbm } from './noise'
 import { recomputeDerived } from './climate'
+import { applyLandRatio, clampLandRatio, DEFAULT_LAND_RATIO } from './land'
+import { createRng, fbm } from './noise'
 import type { Biome, City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -156,10 +157,17 @@ const CITY_NAMES = [
   'Gildenreach',
 ]
 
-export function generateWorld(width: number, height: number, seed: number): World {
+export function generateWorld(
+  width: number,
+  height: number,
+  seed: number,
+  landRatio = DEFAULT_LAND_RATIO,
+): World {
+  const land = clampLandRatio(landRatio)
   const rng = createRng(seed)
   const plateCount = 8 + Math.floor(rng() * 6)
   const plates: Plate[] = []
+  const continentalP = 0.18 + land * 1.0
 
   for (let i = 0; i < plateCount; i++) {
     const ang = rng() * Math.PI * 2
@@ -169,14 +177,16 @@ export function generateWorld(width: number, height: number, seed: number): Worl
       y: rng() * height,
       vx: Math.cos(ang) * speed,
       vy: Math.sin(ang) * speed,
-      continental: rng() > 0.42,
+      continental: rng() < continentalP,
     })
   }
-  // Ensure at least ~40% continental
-  const cont = plates.filter((p) => p.continental).length
-  if (cont < plateCount * 0.35) {
-    plates[0].continental = true
-    plates[1].continental = true
+  const minCont = land > 0.5 ? Math.ceil(plateCount * 0.45) : Math.max(1, Math.ceil(plateCount * 0.28))
+  let cont = plates.filter((p) => p.continental).length
+  for (let i = 0; i < plates.length && cont < minCont; i++) {
+    if (!plates[i].continental) {
+      plates[i].continental = true
+      cont++
+    }
   }
 
   const plateId = assignPlates(width, height, plates, seed)
@@ -198,6 +208,7 @@ export function generateWorld(width: number, height: number, seed: number): Worl
     height,
     seed,
     seaLevel,
+    landRatio: land,
     plateId,
     elev,
     temp: new Float32Array(width * height),
@@ -216,6 +227,7 @@ export function generateWorld(width: number, height: number, seed: number): Worl
     latRows: height,
   }
 
+  applyLandRatio(world, land)
   recomputeDerived(world)
   return world
 }

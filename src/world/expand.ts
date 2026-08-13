@@ -1,4 +1,5 @@
 import { classifyBiome } from './climate'
+import { clampLandRatio } from './land'
 import { fbm } from './noise'
 import type { World } from './types'
 
@@ -78,6 +79,9 @@ export function expandWorld(
   const sea = world.seaLevel
   const seed = world.seed
   const latSpan = Math.max(1, world.latRows - 1)
+  const land = clampLandRatio(world.landRatio)
+  const islandThresh = 0.86 - land * 0.32
+  const continentThresh = 1.02 - land * 0.55
 
   for (let y = 0; y < nh; y++) {
     for (let x = 0; x < nw; x++) {
@@ -119,8 +123,11 @@ export function expandWorld(
         e = edge * shelf * 0.45 + e * (1 - shelf * 0.35)
       }
       const island = fbm(gx / 11, gy / 11, seed + 99, 4)
-      if (island > 0.78 && dist > 12 && n > 0.55) {
-        e = sea + 0.05 + (island - 0.78) * 0.45 + n * 0.08
+      const blob = fbm(gx / 36, gy / 36, seed + 13, 4)
+      if (blob > continentThresh && dist > 10) {
+        e = sea + 0.06 + n * 0.2 + (blob - continentThresh) * 0.45
+      } else if (island > islandThresh && dist > 12 && n > 0.48) {
+        e = sea + 0.05 + (island - islandThresh) * 0.5 + n * 0.08
       }
 
       e = Math.max(0, Math.min(1, e))

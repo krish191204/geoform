@@ -1,5 +1,6 @@
 import type { World } from './types'
 import { recomputeSuitability } from './climate'
+import { landFraction } from './land'
 
 const STORAGE_KEY = 'geoform.autosave.v1'
 
@@ -25,6 +26,7 @@ export interface SavedWorld {
   originX?: number
   originY?: number
   latRows?: number
+  landRatio?: number
 }
 
 export function serializeWorld(world: World): SavedWorld {
@@ -50,6 +52,7 @@ export function serializeWorld(world: World): SavedWorld {
     originX: world.originX,
     originY: world.originY,
     latRows: world.latRows,
+    landRatio: world.landRatio,
   }
 }
 
@@ -79,7 +82,9 @@ export function deserializeWorld(data: SavedWorld): World {
     originX: data.originX ?? 0,
     originY: data.originY ?? 0,
     latRows: data.latRows ?? data.height,
+    landRatio: 0,
   }
+  world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
   recomputeSuitability(world)
   return world
 }

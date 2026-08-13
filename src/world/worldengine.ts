@@ -1,10 +1,11 @@
 import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
+import { landFraction } from './land'
 
 export function worldFromPayload(
   payload: WorldEnginePayload,
   keepCities: World['cities'] = [],
-  frame?: { originX: number; originY: number; latRows: number },
+  frame?: { originX: number; originY: number; latRows: number; landRatio?: number },
 ): World {
   const n = payload.width * payload.height
   const world: World = {
@@ -12,6 +13,7 @@ export function worldFromPayload(
     height: payload.height,
     seed: payload.seed,
     seaLevel: payload.seaLevel,
+    landRatio: 0,
     plateId: Int16Array.from(payload.plateId),
     elev: Float32Array.from(payload.elev),
     temp: Float32Array.from(payload.temp),
@@ -31,6 +33,7 @@ export function worldFromPayload(
     originY: frame?.originY ?? 0,
     latRows: frame?.latRows ?? payload.height,
   }
+  world.landRatio = frame?.landRatio ?? landFraction(world.elev, world.seaLevel)
   recomputeSuitability(world)
   return world
 }
@@ -79,5 +82,6 @@ export async function recomputeWorldEngine(world: World): Promise<World> {
     originX: world.originX,
     originY: world.originY,
     latRows: world.latRows,
+    landRatio: world.landRatio,
   })
 }

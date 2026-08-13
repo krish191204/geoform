@@ -31,6 +31,7 @@ function miniWorld(width = 16, height = 8): World {
     originX: 0,
     originY: 0,
     latRows: height,
+    landRatio: 0.4,
   }
 }
 

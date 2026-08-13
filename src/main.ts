@@ -22,6 +22,7 @@ import {
 } from './world/tools'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { expandWorld, padsForZoomOut } from './world/expand'
+import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell } from './render/draw'
 import type { Layer, Tool, World } from './world/types'
@@ -43,6 +44,7 @@ const TERRAIN_TOOLS: Tool[] = [
 ]
 
 let seed = (Math.random() * 1e9) | 0
+let landRatio = DEFAULT_LAND_RATIO
 let world: World | null = null
 let layer: Layer = 'relief'
 let tool: Tool = 'raise'
@@ -95,10 +97,12 @@ function setStatus(msg: string) {
 function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
+  landRatio = next.landRatio
   history.clear()
   resetView()
   const seedInput = document.querySelector<HTMLInputElement>('#seed')
   if (seedInput) seedInput.value = String(seed)
+  syncLandRatioUi()
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')
@@ -121,6 +125,16 @@ function applyViewTransform() {
   canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewZoom})`
   const hud = document.querySelector('#hudZoom')
   if (hud) hud.textContent = `${Math.round(viewZoom * 100)}%`
+}
+
+function syncLandRatioUi() {
+  const pct = Math.round((world?.landRatio ?? landRatio) * 100)
+  const input = document.querySelector<HTMLInputElement>('#landRatio')
+  if (input && document.activeElement !== input) input.value = String(pct)
+  const landEl = document.querySelector('#landVal')
+  const waterEl = document.querySelector('#waterVal')
+  if (landEl) landEl.textContent = String(pct)
+  if (waterEl) waterEl.textContent = String(100 - pct)
 }
 
 function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number } {
@@ -322,6 +336,11 @@ function renderShell() {
           <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
           <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
         </div>
+        <div class="slider-row">
+          <label>Land · <span id="landVal">${Math.round(landRatio * 100)}</span>% · Water · <span id="waterVal">${Math.round((1 - landRatio) * 100)}</span>%</label>
+          <input id="landRatio" type="range" min="12" max="72" value="${Math.round(landRatio * 100)}" />
+        </div>
+        <p class="hint">Flood or expose coasts. New worlds and zoom-out ocean follow this mix.</p>
 
         <h3>Continents</h3>
         <div class="style-grid" id="continentStyles"></div>
@@ -403,7 +422,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
   setStatus('Generating local world…')
   try {
-    const next = generateWorld(WIDTH, HEIGHT, nextSeed)
+    const next = generateWorld(WIDTH, HEIGHT, nextSeed, landRatio)
     clearAutosave()
     applyWorld(
       next,
@@ -460,6 +479,8 @@ async function loadWorld(nextSeed: number) {
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
+    applyLandRatio(next, landRatio)
+    recomputeDerived(next)
     clearAutosave()
     applyWorld(next, `WorldEngine seed ${next.seed}`)
     hideApiDown()
@@ -542,6 +563,8 @@ function updateHistoryButtons() {
 function doUndo() {
   if (!world || !history.canUndo()) return
   const label = history.undo(world)
+  landRatio = world.landRatio
+  syncLandRatioUi()
   recomputeDerived(world)
   renderer.invalidate()
   updateCities()
@@ -555,6 +578,8 @@ function doUndo() {
 function doRedo() {
   if (!world || !history.canRedo()) return
   const label = history.redo(world)
+  landRatio = world.landRatio
+  syncLandRatioUi()
   recomputeDerived(world)
   renderer.invalidate()
   updateCities()
@@ -669,6 +694,24 @@ function bind() {
   document.querySelector('#softness')!.addEventListener('input', (e) => {
     softness = Number((e.target as HTMLInputElement).value) / 100
     document.querySelector('#softVal')!.textContent = String(Math.round(softness * 100))
+  })
+  const landInput = document.querySelector<HTMLInputElement>('#landRatio')
+  landInput?.addEventListener('input', (e) => {
+    landRatio = Number((e.target as HTMLInputElement).value) / 100
+    document.querySelector('#landVal')!.textContent = String(Math.round(landRatio * 100))
+    document.querySelector('#waterVal')!.textContent = String(Math.round((1 - landRatio) * 100))
+    if (!world || busy) return
+    if (!strokeActive) beginStroke('Land / water')
+    applyLandRatio(world, landRatio)
+    renderer.invalidate()
+    updateCities()
+    updateInspector()
+    setClimatePhase('painting')
+  })
+  landInput?.addEventListener('change', () => {
+    if (!world) return
+    endStroke()
+    setStatus(`Land ${Math.round(landRatio * 100)}% · water ${Math.round((1 - landRatio) * 100)}%`)
   })
 
   document.querySelector('#undo')!.addEventListener('click', doUndo)
@@ -1053,6 +1096,7 @@ function updateInspector() {
   const i = y * world.width + x
   const suit = evaluateSuitability(world, x, y)
   const above = world.elev[i] >= world.seaLevel
+  const landPct = Math.round(landFraction(world.elev, world.seaLevel) * 100)
   el.innerHTML = `
     <div class="inspect-head">
       <strong>${x}, ${y}</strong>
@@ -1061,6 +1105,7 @@ function updateInspector() {
     </div>
     <dl>
       <dt>Elevation</dt><dd>${(world.elev[i] * 100) | 0}%</dd>
+      <dt>Land / water</dt><dd>${landPct}% · ${100 - landPct}%</dd>
       <dt>Temperature</dt><dd>${(world.temp[i] * 100) | 0}%</dd>
       <dt>Moisture</dt><dd>${(world.moist[i] * 100) | 0}%</dd>
       <dt>River flux</dt><dd>${world.flux[i].toFixed(1)}</dd>
