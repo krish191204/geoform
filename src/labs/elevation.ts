@@ -28,7 +28,7 @@ export function mountElevation(root: HTMLElement, onNarrate: (t: string) => void
           <div><span>Snow line</span><strong id="snowLine">—</strong></div>
           <div><span>Lapse</span><strong>6.5 °C/km</strong></div>
         </div>
-        <p class="hint">Drag the ridge to sculpt it. The dashed line is 0 °C — snow follows the physics, not a texture stamp.</p>
+        <p class="hint">Drag the ridge. Snow is the 0 °C contour — the same lapse the atlas uses on mountains.</p>
       </div>
     </div>
   `

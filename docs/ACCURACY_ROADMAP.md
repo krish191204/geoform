@@ -4,7 +4,7 @@
 **Audience:** you (builder) + future agents working on Geoform  
 **Companion dashboard:** open the Cursor canvas `geoform-accuracy-roadmap.canvas.tsx` beside chat  
 
-This document is the full technical requirements dump: data to ingest, mathematics, skills, storage durability, fine-tuning loops, agent/tooling stack (from the repos you named), and a phased execution plan. It assumes the current Geoform MVP (WorldEngine bridge + canvas UI + localStorage) is a **prototype prior**, not the accuracy target.
+This document is the full technical requirements dump: data to ingest, mathematics, skills, storage durability, fine-tuning loops, agent/tooling stack (from the repos you named), and a phased execution plan. The current Geoform local atlas (continents, climate-from-height, silent repair) is **T0**. WorldEngine is an optional bridge, not the accuracy target.
 
 ---
 
@@ -14,7 +14,7 @@ Three different accuracy targets get confused. Pick explicitly; they cost differ
 
 | Tier | Name | Definition | Relative cost |
 |------|------|------------|---------------|
-| **T0** | Coherent fantasy | Rules produce self-consistent maps (today’s WorldEngine) | 1× (done) |
+| **T0** | Coherent fantasy | Local atlas: continents clump, climate follows height, silent repair | 1× (**shipped**) |
 | **T1** | Earth-calibrated fantasy | Brush/climate responses match statistical relationships fitted on Earth data | ~10–30× |
 | **T2** | Regional Earth twin | Given lat/lon bbox, reproduce DEM/climate/hydro within measured error bars | ~100–300× |
 | **T3** | Planetary digital twin | Global, multi-decadal, uncertainty-quantified, forecast-capable | research lab |

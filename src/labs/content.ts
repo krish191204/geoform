@@ -1,4 +1,4 @@
-export type LabId = 'elevation' | 'rivers' | 'rain' | 'tectonics' | 'settle'
+export type LabId = 'elevation' | 'rivers' | 'rain' | 'tectonics' | 'settle' | 'continents'
 
 export interface LabMeta {
   id: LabId
@@ -73,6 +73,19 @@ export const LABS: LabMeta[] = [
       'Water access pulls settlement toward rivers and coasts',
       'Steep slopes and cold summits repel',
       'City placement is a consequence of geography, not a sticker pack',
+    ],
+  },
+  {
+    id: 'continents',
+    num: '06',
+    title: 'Full continents',
+    tagline: 'A wet planet still has continents — not a hundred green specks.',
+    physics:
+      'Land/water mix sets how much crust sits above the sea. Continent mode keeps the largest 2–3 masses and grows their coasts; island mode is the speckle look, on purpose.',
+    teaches: [
+      'Full continents ≠ more land; it is how land clumps',
+      'Raising water shrinks coasts, it should not shatter continents into peaks',
+      'The map editor uses this same generator and silently repairs speckles',
     ],
   },
 ]

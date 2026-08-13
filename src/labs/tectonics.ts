@@ -28,7 +28,7 @@ export function mountTectonics(root: HTMLElement, onNarrate: (t: string) => void
           <div><span>Boundary</span><strong id="modeLabel">Convergent</strong></div>
           <div><span>Relief</span><strong id="reliefVal">—</strong></div>
         </div>
-        <p class="hint">Two plates meet at the dashed suture. Mode changes what the crust does.</p>
+        <p class="hint">Two plates meet at the dashed suture. The atlas sculpts ranges and rifts from the same boundary logic.</p>
       </div>
     </div>
   `

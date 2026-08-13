@@ -90,14 +90,17 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
     for (let i = 0; i < flux.length; i++) maxFlux = Math.max(maxFlux, flux[i])
 
     for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
+      for (let x = 0; x < w; x++) {
         const i = idx(x, y, w)
         if (elev[i] < sea) continue
         if (flux[i] < maxFlux * 0.08) continue
         let best = -1
         let bestE = elev[i]
         for (const [dx, dy] of DIRS) {
-          const j = idx(x + dx, y + dy, w)
+          const nx = (x + dx + w) % w
+          const ny = y + dy
+          if (ny < 0 || ny >= h) continue
+          const j = idx(nx, ny, w)
           if (elev[j] < bestE) {
             bestE = elev[j]
             best = j
@@ -144,7 +147,10 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
         if (elev[i] < sea || flux[i] < maxFlux * 0.12) continue
         let lower = 0
         for (const [dx, dy] of DIRS) {
-          if (elev[idx(x + dx, y + dy, w)] < elev[i] - 0.01) lower++
+          const nx = (x + dx + w) % w
+          const ny = y + dy
+          if (ny < 0 || ny >= h) continue
+          if (elev[idx(nx, ny, w)] < elev[i] - 0.01) lower++
         }
         // peak-like with big river
         if (lower >= 6) {

@@ -13,6 +13,10 @@ description: Geography accuracy rules for Geoform — Earth calibration vs criti
 4. **Do not train climate coefficients on Middle-earth / Westeros** or other copyrighted atlases.
 5. Famous IP maps: private eval only if licensed — never commit to the public repo.
 
+6. **The editor repairs; it does not nag.** `harmonizeWorld` carves ocean, clumps continents, chews rectangular coasts, drains rivers, and relocates drowned cities.
+7. **Full continents means clumping, not land fraction.** A wet mix still has 2–3 masses. Island world is the speckle look on purpose.
+8. Labs, critique, and the atlas share this generator. Critique may grade a broken save; the editor will not leave it broken.
+
 ## AOI #1
 
 `cascades-rain-shadow` — see `data/catalog.yaml`.

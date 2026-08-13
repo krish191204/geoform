@@ -117,4 +117,12 @@ describe('load repairs broken saves', () => {
       false,
     )
   })
+
+  it('can load a broken save unchanged for critique', () => {
+    const world = generateWorld(48, 24, 5, 0.4, 'continents')
+    world.elev.fill(0.7)
+    world.temp.fill(0)
+    const loaded = deserializeWorld(serializeWorld(world), { repair: false })
+    expect(landFraction(loaded.elev, loaded.seaLevel)).toBeGreaterThan(0.9)
+  })
 })

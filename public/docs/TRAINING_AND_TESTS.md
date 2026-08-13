@@ -31,7 +31,9 @@ npm run fixtures:critique
 npm test
 ```
 
-Open [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html) → **Fixture gallery** → Grade all / click a card.
+Open [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html) → **Geoform worlds** and **Fixture gallery**.
+
+The editor silently repairs; critique still names the crime (rectangle, all-land slab, flipped shadow). Geoform JSON can be repaired with the same `harmonizeWorld` pass.
 
 ### Current pack
 

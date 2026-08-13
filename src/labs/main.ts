@@ -1,6 +1,7 @@
 import './style.css'
 import { navHtml } from '../chrome/nav'
 import { LABS, type LabId } from './content'
+import { mountContinents } from './continents'
 import { mountElevation } from './elevation'
 import { mountRain } from './rain'
 import { mountRivers } from './rivers'
@@ -29,7 +30,7 @@ function render() {
         <div class="hero-veil"></div>
         <div class="hero-copy">
           <h1>Labs</h1>
-          <p>Small interactive slices of elevation, rivers, rain shadows, plate edges, and settlement. Feel the rules before they fill a whole map.</p>
+          <p>Same physics as the atlas: elevation, rivers that drain, rain shadows, plate edges, settlement, and how land clumps into continents. The editor applies these quietly; labs let you feel each rule.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" data-jump="labs">Open a lab</button>
             <a class="chip-btn" href="/roadmap.html">Accuracy roadmap</a>
@@ -53,11 +54,9 @@ function render() {
       </section>
 
       <p class="footer-note">
-        These labs are teaching toys with simplified physics — not the full WorldEngine map.
-        Motion follows Disney principles via
-        <a href="https://github.com/dylantarre/animation-principles" target="_blank" rel="noreferrer">animation-principles</a>
-        (staging, solid drawing, appeal, continuous ambient loops, slow-in/out).
-        Roadmap: <a href="/roadmap.html">/roadmap.html</a> · Editor: <a href="/">/</a>
+        These labs are the same rules the local atlas uses — simplified so you can see one force at a time.
+        The map editor silently repairs broken geography; here you can break it on purpose and watch water, climate, and cities follow.
+        Roadmap: <a href="/roadmap.html">/roadmap.html</a> · Critique: <a href="/critique.html">/critique.html</a> · Editor: <a href="/">/</a>
       </p>
     </div>
   `
@@ -116,6 +115,7 @@ function mountActive() {
   else if (active === 'rivers') stopLab = mountRivers(mount, narrate)
   else if (active === 'rain') stopLab = mountRain(mount, narrate)
   else if (active === 'tectonics') stopLab = mountTectonics(mount, narrate)
+  else if (active === 'continents') stopLab = mountContinents(mount, narrate)
   else stopLab = mountSettle(mount, narrate)
 }
 

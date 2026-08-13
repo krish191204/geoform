@@ -63,7 +63,7 @@ export function serializeWorld(world: World): SavedWorld {
   }
 }
 
-export function deserializeWorld(data: SavedWorld): World {
+export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }): World {
   if (data.version !== 1) throw new Error(`Unsupported save version: ${data.version}`)
   const n = data.width * data.height
   if (data.elev.length !== n) throw new Error('Corrupt save: elevation size mismatch')
@@ -96,7 +96,7 @@ export function deserializeWorld(data: SavedWorld): World {
   }
   world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
   world.continentMass = clampContinentMass(data.continentMass)
-  refreshGeography(world, { sculpt: false })
+  if (opts?.repair !== false) refreshGeography(world, { sculpt: false })
   return world
 }
 

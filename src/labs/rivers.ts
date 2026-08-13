@@ -52,7 +52,7 @@ export function mountRivers(root: HTMLElement, onNarrate: (t: string) => void): 
           <div><span>Stream paths</span><strong id="streamN">—</strong></div>
           <div><span>Max flow</span><strong id="maxFlow">—</strong></div>
         </div>
-        <p class="hint">Sculpt the land. Water drains downhill and paints soft river ribbons where flow gathers.</p>
+        <p class="hint">Sculpt the land. Water wraps east–west and drains downhill — same rule as the atlas.</p>
       </div>
     </div>
   `
@@ -97,9 +97,9 @@ export function mountRivers(root: HTMLElement, onNarrate: (t: string) => void): 
       let best = -1
       let bestE = elev[i]
       for (const [dx, dy] of DIRS) {
-        const nx = x + dx
+        const nx = (x + dx + W) % W
         const ny = y + dy
-        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue
+        if (ny < 0 || ny >= H) continue
         const j = idx(nx, ny, W)
         if (elev[j] < bestE) {
           bestE = elev[j]

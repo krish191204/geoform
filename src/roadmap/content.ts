@@ -17,6 +17,29 @@ export interface Stage {
   avoids: string
 }
 
+export const SHIPPED = [
+  {
+    title: 'Local atlas',
+    detail:
+      'New world, paint, and zoom-out run in the browser. WorldEngine is optional. Climate, rivers, and biomes rebuild from the heightfield.',
+  },
+  {
+    title: 'Full continents',
+    detail:
+      'Landmass mode keeps a few large masses even at 22% land. Island world is the speckle look — only if you ask for it.',
+  },
+  {
+    title: 'Silent repair',
+    detail:
+      'The editor carves ocean, chews rectangular coasts, drowns pimples, drains rivers, and moves drowned cities. It does not nag.',
+  },
+  {
+    title: 'Labs + critique',
+    detail:
+      'Labs teach one rule at a time, including continent clumping. Critique grades fixtures and Geoform JSON; Repair runs the same harmonize the editor uses.',
+  },
+]
+
 export const STAGES: Stage[] = [
   {
     id: 'ingest',
@@ -74,8 +97,8 @@ export const STAGES: Stage[] = [
     id: 'runtime',
     num: '05',
     title: 'Runtime recompute',
-    oneLiner: 'Your brush edits height; the fitted model rewrites climate.',
-    feel: 'Geoform stops being a toy generator and becomes an instrument.',
+    oneLiner: 'Your brush edits height; climate, rivers, and biomes rewrite in the browser.',
+    feel: 'Geoform already does this locally. Calibration later swaps the toy lapse/orography for Earth-fitted coefficients.',
     does: [
       'Height edit → calibrated climate / hydro / biomes',
       'Settlement score from learned or explicit utility',
@@ -176,7 +199,7 @@ export const PHASES = [
     id: 'p0',
     title: 'Foundations',
     weeks: '1–2 weeks',
-    blurb: 'Pick an AOI, open the catalog, make storage real.',
+    blurb: 'Done in the local atlas: continents, climate-from-height, silent repair. Catalog and storage next.',
   },
   {
     id: 'p1',
@@ -211,9 +234,11 @@ export const PHASES = [
 ]
 
 export const WEEK_TASKS = [
+  { id: 'play', label: 'New world on Full continents; zoom out; paint a coast — confirm it stays a continent' },
+  { id: 'labs', label: 'Walk Labs 01–06 (elevation → continents)' },
+  { id: 'critique', label: 'Grade the Geoform worlds gallery; repair the stamped rectangle' },
   { id: 'aoi', label: 'Pick first AOI (Andes / Cascades / Hawaiʻi)' },
   { id: 'bucket', label: 'Create object-store bucket + data/catalog.yaml' },
   { id: 'dem', label: 'Download DEM + WorldClim for that AOI; checksum' },
-  { id: 'skill', label: 'Draft .cursor/skills/geoform-geography/SKILL.md' },
-  { id: 'convex', label: 'Decide Convex (or other) for multi-device world saves' },
+  { id: 'skill', label: 'Keep skills/geoform-geography/SKILL.md in sync with the atlas' },
 ]
