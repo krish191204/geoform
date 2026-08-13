@@ -54,35 +54,6 @@ a:hover {
   padding: 1.25rem 0 4rem;
 }
 
-.topnav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.brand-lock {
-  font-family: 'Fraunces', Georgia, serif;
-  font-weight: 700;
-  font-size: 1.35rem;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.brand-lock:hover {
-  color: var(--sea);
-  text-decoration: none;
-}
-
-.nav-links {
-  display: flex;
-  gap: 0.65rem;
-  flex-wrap: wrap;
-}
-
-.nav-links a,
 .chip-btn {
   border: 1px solid rgba(20, 32, 28, 0.14);
   background: rgba(255, 255, 255, 0.45);
@@ -95,7 +66,6 @@ a:hover {
   text-decoration: none;
 }
 
-.nav-links a:hover,
 .chip-btn:hover,
 .chip-btn.active {
   background: var(--ink);

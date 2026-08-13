@@ -107,7 +107,7 @@ function cellColor(
   layer: Layer,
   x: number,
   y: number,
-  showRivers: boolean,
+  riverAmt: number,
   time: number,
 ): [number, number, number] {
   const { width: w, height: h, seaLevel } = world
@@ -182,14 +182,14 @@ function cellColor(
 
   // Rivers — brighter, slightly animated
   if (
-    showRivers &&
+    riverAmt > 0 &&
     layer !== 'plates' &&
     e >= seaLevel &&
     world.flux[i] >= 3.2
   ) {
     const strength = Math.min(1, (world.flux[i] - 3.2) / 10)
     const pulse = 0.85 + 0.15 * Math.sin(time * 3 + x * 0.2 + y * 0.15)
-    const t = (0.45 + strength * 0.4) * pulse
+    const t = (0.45 + strength * 0.4) * pulse * riverAmt
     rgb = mix(rgb, [55, 140, 190], t)
   }
 
@@ -211,6 +211,8 @@ export interface DrawOptions {
   brush?: number
   tool?: string
   painting?: boolean
+  /** Fade river overlay while climate is stale / recomputing */
+  riversMuted?: boolean
 }
 
 interface WindParticle {
@@ -261,6 +263,7 @@ export class MapRenderer {
     const { width: w, height: h } = world
     const cw = w * scale
     const ch = h * scale
+    const riverAmt = opts.showRivers ? (opts.riversMuted ? 0.28 : 1) : 0
     const image = new ImageData(cw, ch)
     const data = image.data
 
@@ -275,10 +278,10 @@ export class MapRenderer {
         const x1 = Math.min(w - 1, x0 + 1)
         const fx = xf - x0
 
-        const c00 = cellColor(world, opts.layer, x0, y0, opts.showRivers, time)
-        const c10 = cellColor(world, opts.layer, x1, y0, opts.showRivers, time)
-        const c01 = cellColor(world, opts.layer, x0, y1, opts.showRivers, time)
-        const c11 = cellColor(world, opts.layer, x1, y1, opts.showRivers, time)
+        const c00 = cellColor(world, opts.layer, x0, y0, riverAmt, time)
+        const c10 = cellColor(world, opts.layer, x1, y0, riverAmt, time)
+        const c01 = cellColor(world, opts.layer, x0, y1, riverAmt, time)
+        const c11 = cellColor(world, opts.layer, x1, y1, riverAmt, time)
         const top = mix(c00, c10, fx)
         const bot = mix(c01, c11, fx)
         const [r, g, b] = mix(top, bot, fy)
@@ -319,7 +322,7 @@ export class MapRenderer {
     }
 
     // Rebuild when world/layer changes — not every shimmer tick
-    const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${scale}`
+    const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
     if (key !== this.cacheKey || !this.base) {
       this.rebuildBase(world, opts, 0)
       this.cacheKey = key
@@ -327,8 +330,15 @@ export class MapRenderer {
 
     ctx.putImageData(this.base!, 0, 0)
 
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+
     // Throttled water shimmer (every 3rd frame) — keeps motion without melting the CPU
-    if (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation') {
+    if (
+      !reduceMotion &&
+      (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation')
+    ) {
       this.shimmerFrame++
       if (this.shimmerFrame % 3 === 0 || !this.shimmerBuf) {
         const img = new ImageData(new Uint8ClampedArray(this.base!.data), cw, ch)
@@ -360,7 +370,7 @@ export class MapRenderer {
     }
 
     // Wind streamers (moisture / relief)
-    if (opts.layer === 'moisture' || opts.layer === 'relief') {
+    if (!reduceMotion && (opts.layer === 'moisture' || opts.layer === 'relief')) {
       this.ensureParticles(world.width, world.height)
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
@@ -386,19 +396,30 @@ export class MapRenderer {
     }
 
     // Brush preview
-    if (opts.hover && (opts.tool === 'raise' || opts.tool === 'lower' || opts.tool === 'city')) {
+    if (
+      opts.hover &&
+      opts.tool &&
+      opts.tool !== 'inspect'
+    ) {
       const { x, y } = opts.hover
       const r = (opts.brush ?? 6) * scale
+      const isCarve = opts.tool === 'lower' || opts.tool === 'channel' || opts.tool === 'sea'
+      const isCity = opts.tool === 'city' || opts.tool === 'razecity'
       ctx.save()
       ctx.beginPath()
-      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, r, 0, Math.PI * 2)
-      ctx.strokeStyle = opts.tool === 'lower' ? 'rgba(180,70,40,0.85)' : 'rgba(243,238,220,0.9)'
-      ctx.lineWidth = opts.painting ? 2.4 : 1.5
-      ctx.setLineDash(opts.tool === 'city' ? [4, 4] : [])
+      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, isCity ? Math.max(10, r * 0.45) : r, 0, Math.PI * 2)
+      ctx.strokeStyle = isCarve
+        ? 'rgba(180,70,40,0.9)'
+        : opts.tool === 'razecity'
+          ? 'rgba(160,40,40,0.9)'
+          : opts.tool === 'smooth' || opts.tool === 'plateau'
+            ? 'rgba(90,140,160,0.9)'
+            : 'rgba(243,238,220,0.92)'
+      ctx.lineWidth = opts.painting ? 2.5 : 1.6
+      ctx.setLineDash(isCity ? [5, 4] : opts.tool === 'ridge' || opts.tool === 'channel' ? [6, 3] : [])
       ctx.stroke()
-      if (opts.tool !== 'city') {
-        ctx.fillStyle =
-          opts.tool === 'raise' ? 'rgba(243,238,220,0.08)' : 'rgba(180,70,40,0.08)'
+      if (!isCity) {
+        ctx.fillStyle = isCarve ? 'rgba(180,70,40,0.08)' : 'rgba(243,238,220,0.07)'
         ctx.fill()
       }
       ctx.restore()

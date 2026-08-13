@@ -1,6 +1,8 @@
 import './style.css'
+import { navHtml } from './chrome/nav'
 import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
-import { generateWorld, nextCityName, paintElevation } from './world/generate'
+import { generateWorld, nextCityName } from './world/generate'
+import { EditHistory } from './world/history'
 import {
   autosaveWorld,
   clearAutosave,
@@ -8,6 +10,16 @@ import {
   loadAutosave,
   readWorldFile,
 } from './world/persist'
+import {
+  brushChannel,
+  brushPlateau,
+  brushRaise,
+  brushRidge,
+  brushSeaLevel,
+  brushSmooth,
+  removeNearestCity,
+  suggestCities,
+} from './world/tools'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell } from './render/draw'
 import type { Layer, Tool, World } from './world/types'
@@ -15,8 +27,18 @@ import type { Layer, Tool, World } from './world/types'
 const WIDTH = 320
 const HEIGHT = 160
 
-/** Local browser sim is the default. WorldEngine is an optional Python backend. */
 type EngineChoice = 'local' | 'worldengine'
+
+const TERRAIN_TOOLS: Tool[] = [
+  'raise',
+  'lower',
+  'smooth',
+  'ridge',
+  'channel',
+  'plateau',
+  'sea',
+  'land',
+]
 
 let seed = (Math.random() * 1e9) | 0
 let world: World | null = null
@@ -24,14 +46,26 @@ let layer: Layer = 'relief'
 let tool: Tool = 'raise'
 let brush = 6
 let strength = 0.045
+let softness = 0.7
 let painting = false
+let strokeActive = false
 let hover: { x: number; y: number } | null = null
+let lastCell: { x: number; y: number } | null = null
 let status = 'Loading…'
 let busy = false
 let recomputeTimer: number | null = null
 let recomputeGeneration = 0
 let autosaveTimer: number | null = null
 let engineChoice: EngineChoice = 'local'
+let viewZoom = 1
+let viewPanX = 0
+let viewPanY = 0
+let panning = false
+let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
+let spaceDown = false
+let climatePhase: 'idle' | 'painting' | 'updating' = 'idle'
+let pendingNewWorld: (() => void) | null = null
+const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
 
@@ -49,72 +83,223 @@ function scheduleAutosave() {
   }, 400)
 }
 
+function setStatus(msg: string) {
+  status = msg
+  const el = document.querySelector('#status')
+  if (el) el.textContent = status
+}
+
 function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
+  history.clear()
+  resetView()
   const seedInput = document.querySelector<HTMLInputElement>('#seed')
   if (seedInput) seedInput.value = String(seed)
   renderer.invalidate()
-  status = message
-  document.querySelector('#status')!.textContent = status
+  setStatus(message)
+  setClimatePhase('idle')
   updateInspector()
   updateCities()
+  updateHistoryButtons()
   scheduleAutosave()
 }
 
+function resetView() {
+  viewZoom = 1
+  viewPanX = 0
+  viewPanY = 0
+  applyViewTransform()
+}
+
+function applyViewTransform() {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (!canvas) return
+  canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewZoom})`
+  const hud = document.querySelector('#hudZoom')
+  if (hud) hud.textContent = `${Math.round(viewZoom * 100)}%`
+}
+
+function zoomAt(clientX: number, clientY: number, factor: number) {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (!canvas) return
+  const oldZoom = viewZoom
+  const next = Math.max(0.55, Math.min(3.2, oldZoom * factor))
+  if (next === oldZoom) return
+  const rect = canvas.getBoundingClientRect()
+  const w = Math.max(1, rect.width)
+  const h = Math.max(1, rect.height)
+  const fx = (clientX - rect.left) / w
+  const fy = (clientY - rect.top) / h
+  viewPanX += (fx - 0.5) * w * (1 - next / oldZoom)
+  viewPanY += (fy - 0.5) * h * (1 - next / oldZoom)
+  viewZoom = next
+  applyViewTransform()
+}
+
+function focusCell(x: number, y: number) {
+  hover = { x, y }
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (!canvas || !world) return
+  viewZoom = Math.max(viewZoom, 1.65)
+  const lx = ((x + 0.5) / world.width) * canvas.offsetWidth
+  const ly = ((y + 0.5) / world.height) * canvas.offsetHeight
+  viewPanX = -(lx - canvas.offsetWidth / 2) * viewZoom
+  viewPanY = -(ly - canvas.offsetHeight / 2) * viewZoom
+  applyViewTransform()
+}
+
+function setClimatePhase(next: 'idle' | 'painting' | 'updating') {
+  if (climatePhase === next) {
+    syncClimateHud()
+    return
+  }
+  climatePhase = next
+  renderer.invalidate()
+  syncClimateHud()
+}
+
+function syncClimateHud() {
+  const el = document.querySelector<HTMLElement>('#hudClimate')
+  if (!el) return
+  if (climatePhase === 'idle') {
+    el.hidden = true
+    el.classList.remove('busy')
+    el.textContent = ''
+    return
+  }
+  el.hidden = false
+  el.classList.toggle('busy', climatePhase === 'updating')
+  el.textContent =
+    climatePhase === 'painting' ? 'Rivers update on release' : 'Updating climate'
+}
+
+function setMapHint(on: boolean) {
+  const el = document.querySelector<HTMLElement>('#mapHint')
+  if (el) el.hidden = !on
+}
+
+function hideConfirm() {
+  pendingNewWorld = null
+  const banner = document.querySelector<HTMLDivElement>('#confirmBanner')
+  if (banner) {
+    banner.hidden = true
+    banner.innerHTML = ''
+  }
+}
+
+function askNewWorld(run: () => void) {
+  if (!world?.cities.length) {
+    run()
+    return
+  }
+  pendingNewWorld = run
+  const banner = document.querySelector<HTMLDivElement>('#confirmBanner')
+  if (!banner) {
+    run()
+    return
+  }
+  banner.hidden = false
+  banner.innerHTML = `
+    <strong>Generate a new world?</strong>
+    <p>This map and its cities will be replaced. Export first if you want a copy.</p>
+    <div class="banner-actions">
+      <button type="button" class="chip primary-chip" id="confirmOk">New world</button>
+      <button type="button" class="chip" id="confirmCancel">Keep this one</button>
+    </div>
+  `
+  banner.querySelector('#confirmOk')?.addEventListener('click', () => {
+    const fn = pendingNewWorld
+    hideConfirm()
+    fn?.()
+  })
+  banner.querySelector('#confirmCancel')?.addEventListener('click', hideConfirm)
+}
+
 function renderShell() {
+  const worldTrailing = `
+    <div class="nav-trailing">
+      <details class="world-menu" id="worldMenu">
+        <summary>World</summary>
+        <div class="world-menu-panel">
+          <label for="seed">Seed</label>
+          <div class="seed-field">
+            <input id="seed" type="number" value="${seed}" />
+            <button type="button" id="randomize" title="Fill a random seed">Shuffle</button>
+          </div>
+          <button type="button" id="export">Export JSON</button>
+          <button type="button" id="import">Import JSON</button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden />
+          <label for="engine">Backend</label>
+          <select id="engine">
+            <option value="local" selected>Local (browser)</option>
+            <option value="worldengine">WorldEngine API</option>
+          </select>
+          <span id="saveMeta" class="save-meta">No save yet</span>
+        </div>
+      </details>
+      <button type="button" id="regen" class="primary">New world</button>
+    </div>
+  `
+
   app.innerHTML = `
-    <header class="topbar">
-      <div class="brand">
-        <h1>Geoform</h1>
-        <p>Geography-aware worldbuilding in the browser — plates, rain shadows, biomes, settlement. Raise a ridge and climate recomputes.</p>
-      </div>
-      <div class="seed-row">
-        <a class="chip-link" href="/labs.html">Geography labs</a>
-        <a class="chip-link" href="/critique.html">Map critique</a>
-        <a class="chip-link" href="/roadmap.html">Accuracy roadmap</a>
-        <label for="seed">Seed</label>
-        <input id="seed" type="number" value="${seed}" />
-        <button type="button" id="regen" class="primary">New world</button>
-        <button type="button" id="randomize">Random seed</button>
-        <button type="button" id="export">Export JSON</button>
-        <button type="button" id="import">Import</button>
-        <input id="importFile" type="file" accept="application/json,.json" hidden />
-        <span id="saveMeta" class="save-meta">No save yet</span>
-      </div>
+    <header class="chrome">
+      ${navHtml('editor', worldTrailing)}
     </header>
     <div class="layout">
-      <aside class="panel">
+      <aside class="panel tools-panel">
         <h2>Tools</h2>
         <div class="tool-grid" id="tools"></div>
+
         <div class="slider-row">
-          <label>Brush size · <span id="brushVal">${brush}</span></label>
-          <input id="brush" type="range" min="2" max="18" value="${brush}" />
+          <label>Brush · <span id="brushVal">${brush}</span></label>
+          <input id="brush" type="range" min="1" max="22" value="${brush}" />
         </div>
         <div class="slider-row">
-          <label>Raise / lower strength</label>
-          <input id="strength" type="range" min="1" max="12" value="${Math.round(strength * 100)}" />
+          <label>Strength · <span id="strengthVal">${Math.round(strength * 100)}</span></label>
+          <input id="strength" type="range" min="1" max="16" value="${Math.round(strength * 100)}" />
         </div>
-        <p class="hint">
-          Runs entirely in this browser. Autosave stays here (no cloud).
-          Export JSON to keep a copy. Optional Python backend is advanced-only.
+        <div class="slider-row">
+          <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
+          <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
+        </div>
+
+        <h3>Actions</h3>
+        <div class="action-row">
+          <button type="button" id="undo" title="Ctrl/⌘ Z">Undo</button>
+          <button type="button" id="redo" title="Ctrl/⌘ Shift Z">Redo</button>
+        </div>
+        <div class="action-row">
+          <button type="button" id="suggestCities">Suggest cities</button>
+          <button type="button" id="clearCities">Clear cities</button>
+        </div>
+        <div class="action-row">
+          <button type="button" id="resetView">Reset view</button>
+          <button type="button" id="recomputeNow">Refresh climate</button>
+        </div>
+
+        <p class="hint shortcuts">
+          <strong>Paint</strong> drag · <strong>Pan</strong> Space+drag or middle mouse ·
+          <strong>Zoom</strong> scroll · <strong>Keys</strong> 1–0 tools, [ ] brush, Z undo
         </p>
-        <details class="advanced">
-          <summary>Advanced engine</summary>
-          <label for="engine">Backend</label>
-          <select id="engine" title="Local is default. WorldEngine needs a separate Python process.">
-            <option value="local" ${engineChoice === 'local' ? 'selected' : ''}>Local (browser) — default</option>
-            <option value="worldengine" ${engineChoice === 'worldengine' ? 'selected' : ''}>WorldEngine (Python API)</option>
-          </select>
-          <p class="hint">WorldEngine is optional. Leave this on Local unless you ran <code>npm run dev:api</code>.</p>
-        </details>
       </aside>
+
       <section class="map-shell">
-        <canvas id="map"></canvas>
+        <div class="map-viewport" id="mapViewport">
+          <canvas id="map"></canvas>
+        </div>
         <div class="map-overlay" id="layers"></div>
-        <div class="loading" id="loading">Generating world…</div>
+        <div class="map-hud" id="mapHud">
+          <span id="hudClimate" hidden></span>
+          <span id="hudZoom">100%</span>
+          <span id="hudTool">Raise</span>
+        </div>
+        <div class="map-hint" id="mapHint" hidden>Drag to raise land</div>
+        <div class="loading" id="loading">Raising continents…</div>
         <div class="api-banner" id="apiBanner" hidden></div>
+        <div class="api-banner" id="confirmBanner" hidden></div>
       </section>
+
       <aside class="panel inspector">
         <h2>Inspector</h2>
         <div id="inspect"></div>
@@ -149,17 +334,19 @@ function hideApiDown() {
 }
 
 function loadLocalWorld(nextSeed: number, note?: string) {
-  setBusy(true, 'Generating world…')
-  status = 'Generating local world…'
-  document.querySelector('#status')!.textContent = status
+  setBusy(true, 'Raising continents…')
+  setStatus('Generating local world…')
   try {
     const next = generateWorld(WIDTH, HEIGHT, nextSeed)
     clearAutosave()
     applyWorld(
       next,
-      note ?? `Seed ${next.seed} · ${next.plateCount} plates · rain shadows & biomes (browser)`,
+      note ?? `Seed ${next.seed} · paint ridges, coasts, and cities — climate follows`,
     )
     hideApiDown()
+    hideConfirm()
+    setMapHint(true)
+    setClimatePhase('idle')
   } finally {
     setBusy(false)
   }
@@ -175,13 +362,13 @@ async function boot() {
   if (saved) {
     applyWorld(
       saved,
-      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities). Generate a new world to discard.`,
+      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities).`,
     )
     const el = document.querySelector('#saveMeta')
     if (el) el.textContent = 'Restored from browser autosave'
+    setMapHint(false)
     return
   }
-
   loadLocalWorld(seed)
 }
 
@@ -202,85 +389,151 @@ async function loadWorld(nextSeed: number) {
     loadLocalWorld(nextSeed)
     return
   }
-
-  setBusy(true, 'Contacting optional WorldEngine API…')
-  status = 'Trying WorldEngine…'
-  document.querySelector('#status')!.textContent = status
+  setBusy(true, 'Raising continents…')
+  setStatus('Trying WorldEngine…')
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     clearAutosave()
-    applyWorld(next, `WorldEngine seed ${next.seed} · ${next.plateCount} plates`)
+    applyWorld(next, `WorldEngine seed ${next.seed}`)
     hideApiDown()
+    setMapHint(true)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     engineChoice = 'local'
     const sel = document.querySelector<HTMLSelectElement>('#engine')
     if (sel) sel.value = 'local'
-    loadLocalWorld(nextSeed, `Python backend unavailable (${msg}) — using local engine instead.`)
+    loadLocalWorld(nextSeed, `Backend unavailable (${msg}) — local engine ready.`)
   } finally {
     setBusy(false)
   }
 }
 
-function scheduleClimateRecompute() {
+function scheduleClimateRecompute(immediate = false) {
   if (!world) return
   if (recomputeTimer !== null) window.clearTimeout(recomputeTimer)
   const gen = ++recomputeGeneration
-  recomputeTimer = window.setTimeout(() => {
-    void (async () => {
-      if (!world || gen !== recomputeGeneration) return
-
-      const useLocal =
-        world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
-      if (useLocal) {
-        recomputeDerived(world)
-        renderer.invalidate()
-        scheduleAutosave()
-        status = 'Climate updated (rain shadow, rivers, biomes).'
-        document.querySelector('#status')!.textContent = status
-        updateInspector()
-        return
-      }
-
-      status = 'Recomputing climate…'
-      document.querySelector('#status')!.textContent = status
-      try {
-        const next = await recomputeWorldEngine(world)
-        if (gen !== recomputeGeneration) return
-        applyWorld(next, 'Climate updated.')
-      } catch (err) {
-        recomputeDerived(world)
-        renderer.invalidate()
-        scheduleAutosave()
-        status = `Backend recompute failed — used local climate (${err instanceof Error ? err.message : String(err)})`
-        document.querySelector('#status')!.textContent = status
-        updateInspector()
-      }
-    })()
-  }, 650)
+  const run = async () => {
+    if (!world || gen !== recomputeGeneration) return
+    const useLocal =
+      world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
+    if (useLocal) {
+      recomputeDerived(world)
+      renderer.invalidate()
+      scheduleAutosave()
+      setStatus('Climate updated — rain shadows, rivers, biomes.')
+      setClimatePhase('idle')
+      updateInspector()
+      return
+    }
+    setStatus('Recomputing climate…')
+    setClimatePhase('updating')
+    try {
+      const next = await recomputeWorldEngine(world)
+      if (gen !== recomputeGeneration) return
+      // preserve history by mutating fields instead of applyWorld wipe
+      world = next
+      renderer.invalidate()
+      setStatus('Climate updated.')
+      setClimatePhase('idle')
+      updateInspector()
+      updateCities()
+      scheduleAutosave()
+    } catch {
+      recomputeDerived(world)
+      renderer.invalidate()
+      setStatus('Used local climate after backend failure.')
+      setClimatePhase('idle')
+      updateInspector()
+    }
+  }
+  if (immediate) void run()
+  else recomputeTimer = window.setTimeout(() => void run(), 420)
 }
+
+function beginStroke(label: string) {
+  if (!world || strokeActive) return
+  history.push(world, label)
+  strokeActive = true
+  updateHistoryButtons()
+}
+
+function endStroke() {
+  if (!strokeActive) return
+  strokeActive = false
+  setClimatePhase('updating')
+  scheduleClimateRecompute()
+}
+
+function updateHistoryButtons() {
+  const undo = document.querySelector<HTMLButtonElement>('#undo')
+  const redo = document.querySelector<HTMLButtonElement>('#redo')
+  if (undo) undo.disabled = !history.canUndo()
+  if (redo) redo.disabled = !history.canRedo()
+}
+
+function doUndo() {
+  if (!world || !history.canUndo()) return
+  const label = history.undo(world)
+  recomputeDerived(world)
+  renderer.invalidate()
+  updateCities()
+  updateInspector()
+  updateHistoryButtons()
+  scheduleAutosave()
+  setClimatePhase('idle')
+  setStatus(label ? `Undo: ${label}` : 'Undo')
+}
+
+function doRedo() {
+  if (!world || !history.canRedo()) return
+  const label = history.redo(world)
+  recomputeDerived(world)
+  renderer.invalidate()
+  updateCities()
+  updateInspector()
+  updateHistoryButtons()
+  scheduleAutosave()
+  setClimatePhase('idle')
+  setStatus(label ? `Redo: ${label}` : 'Redo')
+}
+
+function setTool(next: Tool) {
+  tool = next
+  const tools = document.querySelector('#tools')
+  tools?.querySelectorAll('.tool').forEach((b) => {
+    b.classList.toggle('active', (b as HTMLElement).dataset.tool === tool)
+  })
+  const hud = document.querySelector('#hudTool')
+  const def = TOOL_DEFS.find((t) => t.id === tool)
+  if (hud && def) hud.textContent = def.label
+}
+
+const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
+  { id: 'raise', label: 'Raise', desc: 'Uplift mountains & hills', key: '1' },
+  { id: 'lower', label: 'Lower', desc: 'Erode or sink land', key: '2' },
+  { id: 'smooth', label: 'Smooth', desc: 'Blur harsh terrain', key: '3' },
+  { id: 'ridge', label: 'Ridge', desc: 'Paint a mountain chain', key: '4' },
+  { id: 'channel', label: 'Channel', desc: 'Carve river valleys', key: '5' },
+  { id: 'plateau', label: 'Plateau', desc: 'Flatten a highland', key: '6' },
+  { id: 'sea', label: 'Ocean', desc: 'Paint below sea level', key: '7' },
+  { id: 'land', label: 'Land', desc: 'Raise above the sea', key: '8' },
+  { id: 'city', label: 'Found city', desc: 'Place where geography allows', key: '9' },
+  { id: 'razecity', label: 'Raze city', desc: 'Remove a nearby city', key: '0' },
+  { id: 'inspect', label: 'Inspect', desc: 'Read cell climate & score', key: 'I' },
+]
 
 function bind() {
   const tools = document.querySelector('#tools')!
-  const toolDefs: { id: Tool; label: string; desc: string }[] = [
-    { id: 'raise', label: 'Raise', desc: 'Uplift — climate recomputes' },
-    { id: 'lower', label: 'Lower', desc: 'Erode or sink terrain' },
-    { id: 'city', label: 'Found city', desc: 'Only where geography allows' },
-    { id: 'inspect', label: 'Inspect', desc: 'Read elevation, climate, score' },
-  ]
-  tools.innerHTML = toolDefs
-    .map(
-      (t) =>
-        `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}">${t.label}<small>${t.desc}</small></button>`,
-    )
-    .join('')
+  tools.innerHTML = TOOL_DEFS.map(
+    (t) =>
+      `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}">
+        <span class="tool-main"><span>${t.label}</span><kbd>${t.key}</kbd></span>
+        <small>${t.desc}</small>
+      </button>`,
+  ).join('')
   tools.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      tool = btn.dataset.tool as Tool
-      tools.querySelectorAll('.tool').forEach((b) => b.classList.remove('active'))
-      btn.classList.add('active')
-    })
+    btn.addEventListener('click', () => setTool(btn.dataset.tool as Tool))
   })
 
   const layers = document.querySelector('#layers')!
@@ -306,7 +559,6 @@ function bind() {
       renderer.invalidate()
       layers.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'))
       btn.classList.add('active')
-      // paint loop will redraw
     })
   })
 
@@ -320,30 +572,63 @@ function bind() {
   })
   document.querySelector('#strength')!.addEventListener('input', (e) => {
     strength = Number((e.target as HTMLInputElement).value) / 100
+    document.querySelector('#strengthVal')!.textContent = String(Math.round(strength * 100))
+  })
+  document.querySelector('#softness')!.addEventListener('input', (e) => {
+    softness = Number((e.target as HTMLInputElement).value) / 100
+    document.querySelector('#softVal')!.textContent = String(Math.round(softness * 100))
+  })
+
+  document.querySelector('#undo')!.addEventListener('click', doUndo)
+  document.querySelector('#redo')!.addEventListener('click', doRedo)
+  document.querySelector('#resetView')!.addEventListener('click', () => {
+    resetView()
+    setStatus('View reset')
+  })
+  document.querySelector('#recomputeNow')!.addEventListener('click', () => {
+    setClimatePhase('updating')
+    scheduleClimateRecompute(true)
+  })
+  document.querySelector('#suggestCities')!.addEventListener('click', () => {
+    if (!world) return
+    beginStroke('Suggest cities')
+    strokeActive = false
+    const added = suggestCities(world, 5)
+    world.cities.push(...added)
+    updateCities()
+    updateHistoryButtons()
+    renderer.invalidate()
+    scheduleAutosave()
+    setStatus(added.length ? `Suggested ${added.length} cities on good sites.` : 'No strong sites found — try Settle layer.')
+  })
+  document.querySelector('#clearCities')!.addEventListener('click', () => {
+    if (!world?.cities.length) return
+    beginStroke('Clear cities')
+    strokeActive = false
+    world.cities = []
+    updateCities()
+    updateHistoryButtons()
+    renderer.invalidate()
+    scheduleAutosave()
+    setStatus('Cities cleared')
   })
 
   document.querySelector('#regen')!.addEventListener('click', () => {
     if (busy) return
-    if (world?.cities.length && !confirm('Generate a new world? Current autosave will be replaced.')) return
-    const input = document.querySelector<HTMLInputElement>('#seed')!
-    seed = Number(input.value) || 1
-    void loadWorld(seed)
+    askNewWorld(() => {
+      seed = Number(document.querySelector<HTMLInputElement>('#seed')!.value) || 1
+      void loadWorld(seed)
+    })
   })
   document.querySelector('#randomize')!.addEventListener('click', () => {
-    if (busy) return
-    if (world?.cities.length && !confirm('Generate a new world? Current autosave will be replaced.')) return
     seed = (Math.random() * 1e9) | 0
     document.querySelector<HTMLInputElement>('#seed')!.value = String(seed)
-    void loadWorld(seed)
   })
-
   document.querySelector('#export')!.addEventListener('click', () => {
     if (!world) return
     downloadWorld(world)
-    status = `Exported geoform-seed-${world.seed}.json`
-    document.querySelector('#status')!.textContent = status
+    setStatus(`Exported geoform-seed-${world.seed}.json`)
   })
-
   const importFile = document.querySelector<HTMLInputElement>('#importFile')!
   document.querySelector('#import')!.addEventListener('click', () => importFile.click())
   importFile.addEventListener('change', () => {
@@ -352,13 +637,10 @@ function bind() {
     if (!file) return
     void (async () => {
       try {
-        const next = await readWorldFile(file)
-        applyWorld(next, `Imported ${file.name} (seed ${next.seed}).`)
-        const el = document.querySelector('#saveMeta')
-        if (el) el.textContent = `Imported ${file.name}`
+        applyWorld(await readWorldFile(file), `Imported ${file.name}`)
+        setMapHint(false)
       } catch (err) {
-        status = `Import failed: ${err instanceof Error ? err.message : String(err)}`
-        document.querySelector('#status')!.textContent = status
+        setStatus(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     })()
   })
@@ -367,7 +649,48 @@ function bind() {
     if (world) autosaveWorld(world)
   })
 
+  window.addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement)?.tagName
+    const typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA'
+
+    if (e.code === 'Space' && !typing) {
+      spaceDown = true
+      e.preventDefault()
+    }
+    if (typing) return
+
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) doRedo()
+      else doUndo()
+      return
+    }
+    if (e.key === '[') {
+      brush = Math.max(1, brush - 1)
+      syncBrushUi()
+    }
+    if (e.key === ']') {
+      brush = Math.min(22, brush + 1)
+      syncBrushUi()
+    }
+    const byKey = TOOL_DEFS.find((t) => t.key.toLowerCase() === e.key.toLowerCase())
+    if (byKey) setTool(byKey.id)
+  })
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') spaceDown = false
+  })
+
   const canvas = document.querySelector<HTMLCanvasElement>('#map')!
+  const viewport = document.querySelector<HTMLElement>('#mapViewport')!
+
+  viewport.addEventListener(
+    'wheel',
+    (e) => {
+      e.preventDefault()
+      zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 0.92 : 1.08)
+    },
+    { passive: false },
+  )
 
   const applyAt = (clientX: number, clientY: number, shiftKey: boolean) => {
     if (!world || busy) return
@@ -375,17 +698,8 @@ function bind() {
     if (!cell) return
     hover = cell
 
-    if (tool === 'raise' || tool === 'lower') {
-      paintElevation(world, cell.x, cell.y, brush, tool === 'raise' ? strength : -strength)
-      renderer.invalidate()
-      scheduleAutosave()
-      status =
-        world.engine === 'local'
-          ? 'Terrain edited — local climate will refresh…'
-          : 'Terrain edited — waiting to recompute climate…'
+    if (tool === 'inspect') {
       updateInspector()
-      document.querySelector('#status')!.textContent = status
-      scheduleClimateRecompute()
       return
     }
 
@@ -394,59 +708,156 @@ function bind() {
       return
     }
 
+    if (tool === 'razecity') {
+      beginStroke('Raze city')
+      strokeActive = false
+      const removed = removeNearestCity(world, cell.x, cell.y)
+      updateCities()
+      updateHistoryButtons()
+      renderer.invalidate()
+      scheduleAutosave()
+      setStatus(removed ? `Razed ${removed.name}` : 'No city nearby')
+      return
+    }
+
+    if (!TERRAIN_TOOLS.includes(tool)) return
+
+    if (!strokeActive) {
+      beginStroke(TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit')
+      setClimatePhase('painting')
+      setMapHint(false)
+    }
+
+    const dirX = lastCell ? cell.x - lastCell.x : 1
+    const dirY = lastCell ? cell.y - lastCell.y : 0
+    const dirLen = Math.hypot(dirX, dirY)
+    const strokeDirX = dirLen > 0.1 ? dirX : 1
+    const strokeDirY = dirLen > 0.1 ? dirY : 0
+
+    switch (tool) {
+      case 'raise':
+        brushRaise(world, cell.x, cell.y, brush, strength, softness)
+        break
+      case 'lower':
+        brushRaise(world, cell.x, cell.y, brush, -strength, softness)
+        break
+      case 'smooth':
+        brushSmooth(world, cell.x, cell.y, brush, Math.min(1, strength * 4), softness)
+        break
+      case 'ridge':
+        brushRidge(world, cell.x, cell.y, brush, strength * 1.35, softness, strokeDirX, strokeDirY)
+        break
+      case 'channel':
+        brushChannel(world, cell.x, cell.y, brush, strength, softness, strokeDirX, strokeDirY)
+        break
+      case 'plateau':
+        brushPlateau(world, cell.x, cell.y, brush, Math.min(1, strength * 3), softness)
+        break
+      case 'sea':
+        brushSeaLevel(world, cell.x, cell.y, brush, true, Math.min(1, strength * 3), softness)
+        break
+      case 'land':
+        brushSeaLevel(world, cell.x, cell.y, brush, false, Math.min(1, strength * 3), softness)
+        break
+      default:
+        break
+    }
+
+    lastCell = cell
+    renderer.invalidate()
+    scheduleAutosave()
+    setStatus(`${TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit'} — climate will refresh when you release`)
     updateInspector()
   }
 
   canvas.addEventListener('pointerdown', (e) => {
+    setMapHint(false)
+    hideConfirm()
+    if (e.button === 1 || spaceDown || e.button === 2) {
+      panning = true
+      panStart = { x: e.clientX, y: e.clientY, panX: viewPanX, panY: viewPanY }
+      canvas.setPointerCapture(e.pointerId)
+      e.preventDefault()
+      return
+    }
+    if (e.button !== 0) return
     painting = true
+    lastCell = null
     canvas.setPointerCapture(e.pointerId)
     applyAt(e.clientX, e.clientY, e.shiftKey)
   })
   canvas.addEventListener('pointermove', (e) => {
+    if (panning) {
+      viewPanX = panStart.panX + (e.clientX - panStart.x)
+      viewPanY = panStart.panY + (e.clientY - panStart.y)
+      applyViewTransform()
+      return
+    }
     if (!world) return
-    const cell = screenToCell(canvas, e.clientX, e.clientY, world)
-    hover = cell
-    if (painting && (tool === 'raise' || tool === 'lower')) {
+    hover = screenToCell(canvas, e.clientX, e.clientY, world)
+    if (painting && TERRAIN_TOOLS.includes(tool)) {
       applyAt(e.clientX, e.clientY, e.shiftKey)
     } else {
       updateInspector()
     }
   })
-  canvas.addEventListener('pointerup', () => {
+  const endPointer = () => {
+    if (painting) endStroke()
     painting = false
-  })
+    panning = false
+    lastCell = null
+  }
+  canvas.addEventListener('pointerup', endPointer)
+  canvas.addEventListener('pointercancel', endPointer)
   canvas.addEventListener('pointerleave', () => {
-    painting = false
-    hover = null
+    if (!painting) hover = null
   })
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+
+  document.addEventListener('pointerdown', (e) => {
+    const menu = document.querySelector('#worldMenu')
+    if (menu instanceof HTMLDetailsElement && menu.open && !menu.contains(e.target as Node)) {
+      menu.open = false
+    }
+  })
+
+  updateHistoryButtons()
+  setTool(tool)
+}
+
+function syncBrushUi() {
+  const input = document.querySelector<HTMLInputElement>('#brush')
+  if (input) input.value = String(brush)
+  const val = document.querySelector('#brushVal')
+  if (val) val.textContent = String(brush)
 }
 
 function tryPlaceCity(x: number, y: number, force: boolean) {
   if (!world) return
   const result = evaluateSuitability(world, x, y)
   if (world.cities.some((c) => Math.hypot(c.x - x, c.y - y) < 4)) {
-    status = 'Too close to an existing city.'
-    document.querySelector('#status')!.textContent = status
+    setStatus('Too close to an existing city.')
     updateInspector()
     return
   }
-
   if (!result.ok && !force) {
-    status = `Blocked: ${result.reasons[0]} (score ${(result.score * 100) | 0}%). Hold Shift to force.`
-    document.querySelector('#status')!.textContent = status
+    setStatus(`Blocked: ${result.reasons[0]} (${(result.score * 100) | 0}%). Hold Shift to force.`)
     updateInspector()
     return
   }
-
+  beginStroke('Found city')
+  strokeActive = false
   const name = nextCityName(world)
   world.cities.push({ x, y, name, score: result.score })
-  status =
+  setStatus(
     force && !result.ok
-      ? `Forced ${name} onto a poor site (${(result.score * 100) | 0}%).`
-      : `Founded ${name} — suitability ${(result.score * 100) | 0}%.`
+      ? `Forced ${name} (${(result.score * 100) | 0}%).`
+      : `Founded ${name} — suitability ${(result.score * 100) | 0}%.`,
+  )
   updateInspector()
   updateCities()
-  document.querySelector('#status')!.textContent = status
+  updateHistoryButtons()
+  renderer.invalidate()
   scheduleAutosave()
 }
 
@@ -473,6 +884,7 @@ function paint() {
     brush,
     tool,
     painting,
+    riversMuted: climatePhase !== 'idle',
   })
 }
 
@@ -480,24 +892,26 @@ function updateInspector() {
   const el = document.querySelector('#inspect')
   if (!el) return
   if (!world || !hover) {
-    el.innerHTML = `<p class="hint">Hover the map to read a cell.</p>`
+    el.innerHTML = `<p class="hint">Hover the map. Switch to <strong>Settle</strong> layer to scout city sites.</p>`
     return
   }
   const { x, y } = hover
   const i = y * world.width + x
   const suit = evaluateSuitability(world, x, y)
+  const above = world.elev[i] >= world.seaLevel
   el.innerHTML = `
+    <div class="inspect-head">
+      <strong>${x}, ${y}</strong>
+      <span class="pill ${above ? 'land' : 'sea'}">${above ? 'Land' : 'Ocean'}</span>
+      <span class="pill score ${suit.ok ? 'ok' : 'no'}">${(suit.score * 100) | 0}%</span>
+    </div>
     <dl>
-      <dt>Engine</dt><dd>${world.engine}</dd>
-      <dt>Cell</dt><dd>${x}, ${y}</dd>
       <dt>Elevation</dt><dd>${(world.elev[i] * 100) | 0}%</dd>
-      <dt>Sea level</dt><dd>${world.elev[i] < world.seaLevel ? 'Ocean' : 'Land'}</dd>
       <dt>Temperature</dt><dd>${(world.temp[i] * 100) | 0}%</dd>
       <dt>Moisture</dt><dd>${(world.moist[i] * 100) | 0}%</dd>
       <dt>River flux</dt><dd>${world.flux[i].toFixed(1)}</dd>
       <dt>Biome</dt><dd>${world.biome[i]}</dd>
       <dt>Plate</dt><dd>#${world.plateId[i]}</dd>
-      <dt>Suitability</dt><dd>${(suit.score * 100) | 0}%</dd>
     </dl>
     <ul class="reasons">
       ${suit.reasons.map((r) => `<li class="${suit.ok ? 'good' : 'bad'}">${r}</li>`).join('')}
@@ -509,12 +923,26 @@ function updateCities() {
   const el = document.querySelector('#cities')
   if (!el) return
   if (!world?.cities.length) {
-    el.innerHTML = `<li><span>None yet</span><span>—</span></li>`
+    el.innerHTML = `<li class="empty-city">None yet — try <em>Suggest cities</em> or the Found tool</li>`
     return
   }
   el.innerHTML = world.cities
-    .map((c) => `<li><span>${c.name}</span><span>${(c.score * 100) | 0}%</span></li>`)
+    .map(
+      (c, i) =>
+        `<li class="city-row" data-city="${i}"><span>${c.name}</span><span>${(c.score * 100) | 0}%</span></li>`,
+    )
     .join('')
+  el.querySelectorAll<HTMLElement>('[data-city]').forEach((row) => {
+    row.addEventListener('click', () => {
+      if (!world) return
+      const c = world.cities[Number(row.dataset.city)]
+      if (!c) return
+      hover = { x: c.x, y: c.y }
+      focusCell(c.x, c.y)
+      updateInspector()
+      setStatus(`Focused ${c.name}`)
+    })
+  })
 }
 
 renderShell()

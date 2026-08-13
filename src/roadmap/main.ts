@@ -1,4 +1,5 @@
 import './style.css'
+import { navHtml } from '../chrome/nav'
 import {
   DATASETS,
   PHASES,
@@ -49,21 +50,13 @@ function render() {
 
   root.innerHTML = `
     <div class="shell">
-      <nav class="topnav">
-        <a class="brand-lock" href="/">Geoform</a>
-        <div class="nav-links">
-          <a href="/">Open map editor</a>
-          <a href="/labs.html">Geography labs</a>
-          <a href="/critique.html">Map critique</a>
-          <a href="/docs/ACCURACY_ROADMAP.md">Full report</a>
-        </div>
-      </nav>
+      ${navHtml('roadmap')}
 
       <header class="hero" id="hero">
         <canvas class="hero-canvas" id="heroCanvas" aria-hidden="true"></canvas>
         <div class="hero-veil"></div>
         <div class="hero-copy">
-          <h1>Geoform</h1>
+          <h1>Roadmap</h1>
           <p>From toy continents to Earth-taught climate. Walk the accuracy pipeline — feel rain shadows, stock the data vault, and track what to do this week.</p>
           <div class="hero-actions">
             <button type="button" class="chip-btn btn-primary" data-jump="pipeline">Walk the pipeline</button>
