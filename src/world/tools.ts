@@ -12,6 +12,10 @@ export function cloneCities(cities: City[]): City[] {
   return cities.map((c) => ({ ...c }))
 }
 
+export function clonePlateId(plateId: Int16Array): Int16Array {
+  return new Int16Array(plateId)
+}
+
 /** Soft falloff brush weight in [0,1]. */
 function weight(dx: number, dy: number, radius: number, softness: number): number {
   const d = Math.hypot(dx, dy)

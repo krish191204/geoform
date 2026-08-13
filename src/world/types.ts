@@ -19,6 +19,7 @@ export type Tool =
   | 'city'
   | 'razecity'
   | 'inspect'
+  | 'continent'
 
 /** WorldEngine Holdridge names + a few UI aliases */
 export type Biome = string

@@ -20,6 +20,7 @@ import {
   removeNearestCity,
   suggestCities,
 } from './world/tools'
+import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell } from './render/draw'
 import type { Layer, Tool, World } from './world/types'
@@ -44,6 +45,7 @@ let seed = (Math.random() * 1e9) | 0
 let world: World | null = null
 let layer: Layer = 'relief'
 let tool: Tool = 'raise'
+let continentStyle: ContinentStyle = 'collision'
 let brush = 6
 let strength = 0.045
 let softness = 0.7
@@ -264,6 +266,13 @@ function renderShell() {
           <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
         </div>
 
+        <h3>Continents</h3>
+        <div class="style-grid" id="continentStyles"></div>
+        <div class="action-row">
+          <button type="button" id="autoContinent">Auto-place</button>
+        </div>
+        <p class="hint" id="continentHint">Pick a style, then use Add continent on the map — or Auto-place in open ocean.</p>
+
         <h3>Actions</h3>
         <div class="action-row">
           <button type="button" id="undo" title="Ctrl/⌘ Z">Undo</button>
@@ -440,6 +449,7 @@ function scheduleClimateRecompute(immediate = false) {
       updateCities()
       scheduleAutosave()
     } catch {
+      if (!world) return
       recomputeDerived(world)
       renderer.invalidate()
       setStatus('Used local climate after backend failure.')
@@ -507,6 +517,7 @@ function setTool(next: Tool) {
   const hud = document.querySelector('#hudTool')
   const def = TOOL_DEFS.find((t) => t.id === tool)
   if (hud && def) hud.textContent = def.label
+  syncContinentHint()
 }
 
 const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
@@ -521,6 +532,7 @@ const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'city', label: 'Found city', desc: 'Place where geography allows', key: '9' },
   { id: 'razecity', label: 'Raze city', desc: 'Remove a nearby city', key: '0' },
   { id: 'inspect', label: 'Inspect', desc: 'Read cell climate & score', key: 'I' },
+  { id: 'continent', label: 'Add continent', desc: 'New landmass; plates rewrite', key: 'C' },
 ]
 
 function bind() {
@@ -535,6 +547,29 @@ function bind() {
   tools.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool as Tool))
   })
+
+  const styles = document.querySelector('#continentStyles')
+  if (styles) {
+    styles.innerHTML = CONTINENT_STYLES.map(
+      (s) =>
+        `<button type="button" class="style-chip ${s.id === continentStyle ? 'active' : ''}" data-style="${s.id}" title="${s.desc}">
+          <span>${s.label}</span>
+          <small>${s.desc}</small>
+        </button>`,
+    ).join('')
+    styles.querySelectorAll<HTMLButtonElement>('[data-style]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        continentStyle = btn.dataset.style as ContinentStyle
+        styles.querySelectorAll('.style-chip').forEach((b) => b.classList.remove('active'))
+        btn.classList.add('active')
+        syncContinentHint()
+      })
+    })
+  }
+  document.querySelector('#autoContinent')?.addEventListener('click', () => {
+    placeContinentAuto()
+  })
+  syncContinentHint()
 
   const layers = document.querySelector('#layers')!
   const layerDefs: { id: Layer; label: string }[] = [
@@ -720,6 +755,11 @@ function bind() {
       return
     }
 
+    if (tool === 'continent') {
+      placeContinentAt(cell.x, cell.y)
+      return
+    }
+
     if (!TERRAIN_TOOLS.includes(tool)) return
 
     if (!strokeActive) {
@@ -830,6 +870,56 @@ function syncBrushUi() {
   if (input) input.value = String(brush)
   const val = document.querySelector('#brushVal')
   if (val) val.textContent = String(brush)
+}
+
+function continentRadius(): number {
+  return Math.round(10 + brush * 1.7)
+}
+
+function syncContinentHint() {
+  const el = document.querySelector('#continentHint')
+  const def = CONTINENT_STYLES.find((s) => s.id === continentStyle)
+  if (el && def) {
+    el.textContent =
+      tool === 'continent'
+        ? `Click ocean to place — ${def.desc}`
+        : `${def.desc} · choose Add continent (C) or Auto-place`
+  }
+}
+
+function placeContinentAt(x: number, y: number) {
+  if (!world || busy) return
+  const style = CONTINENT_STYLES.find((s) => s.id === continentStyle)
+  beginStroke(style ? `Add ${style.label.toLowerCase()}` : 'Add continent')
+  strokeActive = false
+  const result = addContinent(world, x, y, continentStyle, continentRadius())
+  if (!result.ok) {
+    history.cancelLast()
+    updateHistoryButtons()
+    setStatus(result.message)
+    return
+  }
+  setMapHint(false)
+  renderer.invalidate()
+  updateCities()
+  updateInspector()
+  updateHistoryButtons()
+  scheduleAutosave()
+  setClimatePhase('updating')
+  scheduleClimateRecompute()
+  setStatus(result.message)
+}
+
+function placeContinentAuto() {
+  if (!world || busy) return
+  const site = findOceanSite(world, continentStyle)
+  if (!site) {
+    setStatus('No open ocean large enough — lower some land first.')
+    return
+  }
+  placeContinentAt(site.x, site.y)
+  hover = site
+  updateInspector()
 }
 
 function tryPlaceCity(x: number, y: number, force: boolean) {
