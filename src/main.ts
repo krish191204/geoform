@@ -126,6 +126,10 @@ function applyWorld(next: World, message: string) {
   syncLandRatioUi()
   syncMassUi()
   syncTimelineUi()
+  if (landFraction(next.elev, next.seaLevel) > 0.77) {
+    applyLandRatio(next, next.landRatio)
+  }
+  recomputeDerived(next)
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')

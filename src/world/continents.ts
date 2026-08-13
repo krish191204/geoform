@@ -273,6 +273,7 @@ export function addContinent(
       if (e2 > 0.72 + coast * 0.55) continue
       if (e2 > 0.28 && gulfs < 0.32) continue
       if (style === 'archipelago' && coast < 0.48) continue
+      if (style === 'arcs' && (e2 < 0.38 || gulfs < 0.3)) continue
       mask[idx(w, x, y)] = 1
       claimed++
     }

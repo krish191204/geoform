@@ -80,6 +80,21 @@ describe('flagImpossibleGeography', () => {
     expect(flags.some((f) => f.id === 'pimples' || f.id === 'shattered')).toBe(true)
   })
 
+  it('flags a planet with no ocean as a fake rectangle', () => {
+    const world = blankWorld(32, 16)
+    world.elev.fill(0.7)
+    const flags = flagImpossibleGeography(world, 'continents')
+    expect(flags.some((f) => f.id === 'no-ocean')).toBe(true)
+  })
+
+  it('flags weather that never ran', () => {
+    const world = generateWorld(48, 24, 5, 0.4, 'continents')
+    world.temp.fill(0)
+    world.moist.fill(0)
+    const flags = flagImpossibleGeography(world, 'continents')
+    expect(flags.some((f) => f.id === 'dead-climate')).toBe(true)
+  })
+
   it('flags a city in the ocean', () => {
     const world = blankWorld(16, 8)
     world.cities.push({ x: 1, y: 1, name: 'Atlantis', score: 0.9 })

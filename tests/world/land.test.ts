@@ -25,6 +25,15 @@ describe('applyLandRatio', () => {
       world.cities.every((c) => world.elev[c.y * world.width + c.x] >= world.seaLevel),
     ).toBe(true)
   })
+
+  it('carves ocean when the heightfield is a flat land slab', () => {
+    const world = generateWorld(48, 24, 3, 0.4)
+    world.elev.fill(0.7)
+    applyLandRatio(world, 0.4)
+    const mix = landFraction(world.elev, world.seaLevel)
+    expect(mix).toBeGreaterThan(0.15)
+    expect(mix).toBeLessThan(0.75)
+  })
 })
 
 describe('generateWorld land ratio', () => {

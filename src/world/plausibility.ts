@@ -74,6 +74,13 @@ export function flagImpossibleGeography(world: World, mass?: ContinentMass): Geo
       title: 'There is no continent',
       detail: 'Almost no land sits above sea level. Raise some ground or flood less water.',
     })
+  } else if (stats.landCells / Math.max(1, world.width * world.height) > 0.9) {
+    flags.push({
+      id: 'no-ocean',
+      severity: 'impossible',
+      title: 'No ocean — that rectangle is the whole planet',
+      detail: `${Math.round((stats.landCells / (world.width * world.height)) * 100)}% of cells are land. The teal around the atlas is empty UI, not water. Flood coasts or hit New world.`,
+    })
   } else if (want === 'continents' && stats.speckleShare > 0.28) {
     flags.push({
       id: 'pimples',
@@ -122,8 +129,20 @@ export function flagImpossibleGeography(world: World, mass?: ContinentMass): Geo
     })
   }
 
+  let tMax = 0
+  for (let i = 0; i < world.temp.length; i++) tMax = Math.max(tMax, world.temp[i])
+  if (stats.landCells > 20 && tMax < 0.05) {
+    flags.push({
+      id: 'dead-climate',
+      severity: 'impossible',
+      title: 'Weather never ran',
+      detail: 'Temperature and rain are still zero. Refresh climate so physics follows the land.',
+    })
+  }
+
   const climb = riversClimb(world)
-  if (climb.count > 12) {
+  const landFrac = stats.landCells / Math.max(1, world.width * world.height)
+  if (landFrac < 0.88 && climb.count > 12) {
     flags.push({
       id: 'climbing-rivers',
       severity: 'impossible',
