@@ -132,9 +132,29 @@ function resetView() {
   applyViewTransform()
 }
 
+function fitAtlasCanvas() {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  const vp = document.querySelector<HTMLElement>('#mapViewport')
+  const src = displayWorld() ?? world
+  if (!canvas || !vp || !src) return
+  const aspect = src.width / Math.max(1, src.height)
+  const vw = vp.clientWidth
+  const vh = vp.clientHeight
+  if (vw < 2 || vh < 2) return
+  let w = vw
+  let h = w / aspect
+  if (h > vh) {
+    h = vh
+    w = h * aspect
+  }
+  canvas.style.width = `${Math.max(1, Math.round(w))}px`
+  canvas.style.height = `${Math.max(1, Math.round(h))}px`
+}
+
 function applyViewTransform() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
+  fitAtlasCanvas()
   canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewZoom})`
   const hud = document.querySelector('#hudZoom')
   if (hud) {
@@ -298,11 +318,17 @@ function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number }
 }
 
 function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
-  if (!world || busy || strokeActive || factor >= 1 || viewZoom > 1.001) return false
-  // If the canvas is already CSS-shrunk, grow enough that the old map stays
-  // the same on-screen size once we snap back to 100%.
+  if (!world || busy || strokeActive || factor >= 1) return false
+  const vp = document.querySelector<HTMLElement>('#mapViewport')
   const target = viewZoom < 0.999 ? viewZoom * factor : factor
-  const pads = padsForZoomOut(world, target, fx, fy)
+  const pads = padsForZoomOut(
+    world,
+    target,
+    fx,
+    fy,
+    vp?.clientWidth ?? 0,
+    vp?.clientHeight ?? 0,
+  )
   if (!pads) return false
   beginStroke('Expand map')
   strokeActive = false
@@ -318,7 +344,11 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   timelineAge = 0
   timelineView = null
   syncTimelineUi()
-  refreshGeography(world, { sculpt: true })
+  try {
+    refreshGeography(world, { sculpt: true })
+  } catch {
+    recomputeDerived(world)
+  }
   renderer.invalidate()
   setClimatePhase('idle')
   updateCities()
@@ -333,10 +363,18 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
   const { fx, fy } = zoomFocus(clientX, clientY)
-  if (tryExpandOnZoomOut(factor, fx, fy)) return
+
+  if (factor < 1 && viewZoom * factor < 1.02) {
+    if (tryExpandOnZoomOut(factor, fx, fy)) return
+    viewZoom = 1
+    viewPanX = 0
+    viewPanY = 0
+    applyViewTransform()
+    return
+  }
 
   const oldZoom = viewZoom
-  const next = Math.max(0.55, Math.min(3.2, oldZoom * factor))
+  const next = Math.max(1, Math.min(3.2, oldZoom * factor))
   if (next === oldZoom) return
   const rect = canvas.getBoundingClientRect()
   const w = Math.max(1, rect.width)
@@ -346,6 +384,11 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
   viewPanX += (cfx - 0.5) * w * (1 - next / oldZoom)
   viewPanY += (cfy - 0.5) * h * (1 - next / oldZoom)
   viewZoom = next
+  if (viewZoom <= 1.001) {
+    viewZoom = 1
+    viewPanX = 0
+    viewPanY = 0
+  }
   applyViewTransform()
 }
 
@@ -814,6 +857,7 @@ function bind() {
   if (globeCanvas) planet = new PlanetView(globeCanvas)
   window.addEventListener('resize', () => {
     if (viewMode === 'planet') planet?.layout()
+    else applyViewTransform()
   })
   document.querySelector('#viewAtlas')?.addEventListener('click', () => setViewMode('atlas'))
   document.querySelector('#viewPlanet')?.addEventListener('click', () => setViewMode('planet'))
@@ -975,6 +1019,11 @@ function bind() {
 
   const canvas = document.querySelector<HTMLCanvasElement>('#map')!
   const viewport = document.querySelector<HTMLElement>('#mapViewport')!
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(() => {
+      if (viewMode === 'atlas') applyViewTransform()
+    }).observe(viewport)
+  }
 
   viewport.addEventListener(
     'wheel',
@@ -1279,6 +1328,7 @@ function rasterScale(w: World): number {
 function paint() {
   const src = displayWorld()
   if (!src) return
+  if (viewMode !== 'planet') fitAtlasCanvas()
   if (viewMode === 'planet' && planet) {
     planet.layout()
     planet.sync(

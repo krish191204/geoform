@@ -33,10 +33,29 @@ export function padsForZoomOut(
   factor: number,
   focusX: number,
   focusY: number,
+  viewW = 0,
+  viewH = 0,
 ): { left: number; right: number; top: number; bottom: number } | null {
   const scaleUp = 1 / Math.max(0.5, Math.min(0.98, factor))
   let extraW = Math.max(8, Math.round(world.width * (scaleUp - 1)))
   let extraH = Math.max(4, Math.round(world.height * (scaleUp - 1)))
+  extraW = Math.min(extraW, MAX_WORLD_WIDTH - world.width)
+  extraH = Math.min(extraH, MAX_WORLD_HEIGHT - world.height)
+
+  if (viewW > 40 && viewH > 40) {
+    const nw = world.width + extraW
+    const nh = world.height + extraH
+    const worldAspect = nw / Math.max(1, nh)
+    const viewAspect = viewW / viewH
+    if (worldAspect > viewAspect + 0.03) {
+      const wantH = Math.round(nw / viewAspect)
+      extraH += Math.max(0, Math.min(MAX_WORLD_HEIGHT - (world.height + extraH), wantH - nh))
+    } else if (viewAspect > worldAspect + 0.03) {
+      const wantW = Math.round(nh * viewAspect)
+      extraW += Math.max(0, Math.min(MAX_WORLD_WIDTH - (world.width + extraW), wantW - nw))
+    }
+  }
+
   extraW = Math.min(extraW, MAX_WORLD_WIDTH - world.width)
   extraH = Math.min(extraH, MAX_WORLD_HEIGHT - world.height)
   if (extraW <= 0 && extraH <= 0) return null

@@ -569,6 +569,34 @@ export class MapRenderer {
   }
 }
 
+/** Normalize a client point onto a contain-fitted bitmap (object-fit: contain). */
+export function clientToContainedBitmap(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  bitmapW: number,
+  bitmapH: number,
+): { nx: number; ny: number } | null {
+  if (rect.width < 1 || rect.height < 1 || bitmapW < 1 || bitmapH < 1) return null
+  const boxAspect = rect.width / rect.height
+  const bmpAspect = bitmapW / bitmapH
+  let left = rect.left
+  let top = rect.top
+  let drawW = rect.width
+  let drawH = rect.height
+  if (boxAspect > bmpAspect + 1e-6) {
+    drawW = drawH * bmpAspect
+    left += (rect.width - drawW) / 2
+  } else if (bmpAspect > boxAspect + 1e-6) {
+    drawH = drawW / bmpAspect
+    top += (rect.height - drawH) / 2
+  }
+  const nx = (clientX - left) / drawW
+  const ny = (clientY - top) / drawH
+  if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null
+  return { nx, ny }
+}
+
 export function screenToCell(
   canvas: HTMLCanvasElement,
   clientX: number,
@@ -576,8 +604,10 @@ export function screenToCell(
   world: World,
 ): { x: number; y: number } | null {
   const rect = canvas.getBoundingClientRect()
-  const x = Math.floor(((clientX - rect.left) / rect.width) * world.width)
-  const y = Math.floor(((clientY - rect.top) / rect.height) * world.height)
+  const mapped = clientToContainedBitmap(clientX, clientY, rect, canvas.width, canvas.height)
+  if (!mapped) return null
+  const x = Math.floor(mapped.nx * world.width)
+  const y = Math.floor(mapped.ny * world.height)
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return null
   return { x, y }
 }

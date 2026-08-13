@@ -52,6 +52,18 @@ describe('padsForZoomOut', () => {
     const world = miniWorld(MAX_WORLD_WIDTH, MAX_WORLD_HEIGHT)
     expect(padsForZoomOut(world, 0.92, 0.5, 0.5)).toBeNull()
   })
+
+  it('adds height when the viewport is taller than the atlas', () => {
+    const world = miniWorld(32, 8)
+    const pads = padsForZoomOut(world, 0.92, 0.5, 0.5, 400, 400)
+    expect(pads).not.toBeNull()
+    const extraW = pads!.left + pads!.right
+    const extraH = pads!.top + pads!.bottom
+    expect(extraH).toBeGreaterThan(extraW)
+    const aspect = (world.width + extraW) / (world.height + extraH)
+    expect(aspect).toBeGreaterThan(0.7)
+    expect(aspect).toBeLessThan(1.4)
+  })
 })
 
 describe('expandWorld', () => {
