@@ -24,7 +24,8 @@ import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } fr
 import { expandWorld, padsForZoomOut } from './world/expand'
 import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
-import { MapRenderer, screenToCell } from './render/draw'
+import { MapRenderer, screenToCell, type MapLook } from './render/draw'
+import { PlanetView } from './render/globe'
 import type { Layer, Tool, World } from './world/types'
 
 const WIDTH = 320
@@ -65,6 +66,9 @@ let engineChoice: EngineChoice = 'local'
 let viewZoom = 1
 let viewPanX = 0
 let viewPanY = 0
+let viewMode: 'atlas' | 'planet' = 'atlas'
+let globeLook: MapLook = 'relief'
+let planet: PlanetView | null = null
 let panning = false
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let spaceDown = false
@@ -116,6 +120,7 @@ function resetView() {
   viewZoom = 1
   viewPanX = 0
   viewPanY = 0
+  planet?.reset()
   applyViewTransform()
 }
 
@@ -124,7 +129,84 @@ function applyViewTransform() {
   if (!canvas) return
   canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewZoom})`
   const hud = document.querySelector('#hudZoom')
-  if (hud) hud.textContent = `${Math.round(viewZoom * 100)}%`
+  if (hud) {
+    hud.textContent =
+      viewMode === 'planet' ? 'Globe' : `${Math.round(viewZoom * 100)}%`
+  }
+}
+
+function isLayerLook(look: MapLook): look is Layer {
+  return look !== 'satellite' && look !== 'night'
+}
+
+function setViewMode(mode: 'atlas' | 'planet') {
+  viewMode = mode
+  const map = document.querySelector<HTMLCanvasElement>('#map')
+  const globe = document.querySelector<HTMLCanvasElement>('#globe')
+  if (map) map.hidden = mode === 'planet'
+  if (globe) globe.hidden = mode === 'atlas'
+  document.querySelector('#viewAtlas')?.classList.toggle('active', mode === 'atlas')
+  document.querySelector('#viewPlanet')?.classList.toggle('active', mode === 'planet')
+  if (mode === 'planet') {
+    if (isLayerLook(layer)) globeLook = layer
+    planet?.layout()
+    renderer.invalidate()
+    setStatus('Planet — drag to spin, drag up/down to tilt, scroll to zoom. Looks change the surface.')
+  } else {
+    if (isLayerLook(globeLook)) layer = globeLook
+    setStatus('Atlas view')
+  }
+  renderLayerChips()
+  applyViewTransform()
+}
+
+function renderLayerChips() {
+  const layers = document.querySelector('#layers')
+  if (!layers) return
+  const defs: { id: MapLook; label: string }[] =
+    viewMode === 'planet'
+      ? [
+          { id: 'relief', label: 'Relief' },
+          { id: 'satellite', label: 'Satellite' },
+          { id: 'night', label: 'Night' },
+          { id: 'biome', label: 'Biome' },
+          { id: 'moisture', label: 'Moisture' },
+          { id: 'temperature', label: 'Heat' },
+          { id: 'plates', label: 'Plates' },
+          { id: 'elevation', label: 'Height' },
+        ]
+      : [
+          { id: 'relief', label: 'Relief' },
+          { id: 'biome', label: 'Biome' },
+          { id: 'moisture', label: 'Moisture' },
+          { id: 'temperature', label: 'Heat' },
+          { id: 'suitability', label: 'Settle' },
+          { id: 'plates', label: 'Plates' },
+          { id: 'elevation', label: 'Height' },
+        ]
+  const current = viewMode === 'planet' ? globeLook : layer
+  layers.innerHTML = defs
+    .map(
+      (l) =>
+        `<button type="button" class="chip ${current === l.id ? 'active' : ''}" data-look="${l.id}">${l.label}</button>`,
+    )
+    .join('')
+  layers.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.look as MapLook
+      if (viewMode === 'planet') {
+        globeLook = next
+        if (isLayerLook(next)) layer = next
+      } else if (isLayerLook(next)) {
+        layer = next
+        globeLook = next
+        if (layer === 'suitability' && world) recomputeSuitability(world)
+      }
+      renderer.invalidate()
+      planet?.setLook(globeLook)
+      renderLayerChips()
+    })
+  })
 }
 
 function syncLandRatioUi() {
@@ -135,6 +217,17 @@ function syncLandRatioUi() {
   const waterEl = document.querySelector('#waterVal')
   if (landEl) landEl.textContent = String(pct)
   if (waterEl) waterEl.textContent = String(100 - pct)
+}
+
+function pickCell(clientX: number, clientY: number): { x: number; y: number } | null {
+  if (!world) return null
+  if (viewMode === 'planet') {
+    if (!planet) return null
+    return planet.pick(clientX, clientY, world)
+  }
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (!canvas) return null
+  return screenToCell(canvas, clientX, clientY, world)
 }
 
 function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number } {
@@ -365,18 +458,21 @@ function renderShell() {
 
         <p class="hint shortcuts">
           <strong>Paint</strong> drag · <strong>Pan</strong> Space+drag or middle mouse ·
-          <strong>Zoom</strong> scroll (out grows the atlas) · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
+          <strong>Zoom</strong> scroll (out grows the atlas) · <strong>Planet</strong> G · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
         </p>
       </aside>
 
       <section class="map-shell">
         <div class="map-viewport" id="mapViewport">
           <canvas id="map"></canvas>
+          <canvas id="globe" hidden></canvas>
         </div>
         <div class="map-overlay" id="layers"></div>
         <div class="map-hud" id="mapHud">
           <span id="hudClimate" hidden></span>
           <span id="hudZoom">100%</span>
+          <button type="button" class="view-toggle active" id="viewAtlas" title="Flat atlas">Atlas</button>
+          <button type="button" class="view-toggle" id="viewPlanet" title="Rotate the planet">Planet</button>
           <span id="hudTool">Raise</span>
         </div>
         <div class="map-hint" id="mapHint" hidden>Drag to raise land</div>
@@ -652,32 +748,15 @@ function bind() {
     placeContinentAuto()
   })
   syncContinentHint()
+  renderLayerChips()
 
-  const layers = document.querySelector('#layers')!
-  const layerDefs: { id: Layer; label: string }[] = [
-    { id: 'relief', label: 'Relief' },
-    { id: 'biome', label: 'Biome' },
-    { id: 'moisture', label: 'Moisture' },
-    { id: 'temperature', label: 'Heat' },
-    { id: 'suitability', label: 'Settle' },
-    { id: 'plates', label: 'Plates' },
-    { id: 'elevation', label: 'Height' },
-  ]
-  layers.innerHTML = layerDefs
-    .map(
-      (l) =>
-        `<button type="button" class="chip ${layer === l.id ? 'active' : ''}" data-layer="${l.id}">${l.label}</button>`,
-    )
-    .join('')
-  layers.querySelectorAll<HTMLButtonElement>('[data-layer]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      layer = btn.dataset.layer as Layer
-      if (layer === 'suitability' && world) recomputeSuitability(world)
-      renderer.invalidate()
-      layers.querySelectorAll('.chip').forEach((b) => b.classList.remove('active'))
-      btn.classList.add('active')
-    })
+  const globeCanvas = document.querySelector<HTMLCanvasElement>('#globe')
+  if (globeCanvas) planet = new PlanetView(globeCanvas)
+  window.addEventListener('resize', () => {
+    if (viewMode === 'planet') planet?.layout()
   })
+  document.querySelector('#viewAtlas')?.addEventListener('click', () => setViewMode('atlas'))
+  document.querySelector('#viewPlanet')?.addEventListener('click', () => setViewMode('planet'))
 
   document.querySelector('#engine')?.addEventListener('change', (e) => {
     engineChoice = (e.target as HTMLSelectElement).value as EngineChoice
@@ -800,6 +879,10 @@ function bind() {
       else doUndo()
       return
     }
+    if (e.key.toLowerCase() === 'g') {
+      setViewMode(viewMode === 'planet' ? 'atlas' : 'planet')
+      return
+    }
     if (e.key === '[') {
       brush = Math.max(1, brush - 1)
       syncBrushUi()
@@ -822,6 +905,10 @@ function bind() {
     'wheel',
     (e) => {
       e.preventDefault()
+      if (viewMode === 'planet') {
+        planet?.dolly(e.deltaY > 0 ? 1.08 : 0.92)
+        return
+      }
       zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 0.92 : 1.08)
     },
     { passive: false },
@@ -829,7 +916,7 @@ function bind() {
 
   const applyAt = (clientX: number, clientY: number, shiftKey: boolean) => {
     if (!world || busy) return
-    const cell = screenToCell(canvas, clientX, clientY, world)
+    const cell = pickCell(clientX, clientY)
     if (!cell) return
     hover = cell
 
@@ -934,7 +1021,7 @@ function bind() {
       return
     }
     if (!world) return
-    hover = screenToCell(canvas, e.clientX, e.clientY, world)
+    hover = pickCell(e.clientX, e.clientY)
     if (painting && TERRAIN_TOOLS.includes(tool)) {
       applyAt(e.clientX, e.clientY, e.shiftKey)
     } else {
@@ -953,6 +1040,52 @@ function bind() {
     if (!painting) hover = null
   })
   canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+
+  const globeEl = document.querySelector<HTMLCanvasElement>('#globe')
+  if (globeEl && planet) {
+    let planetMoved = false
+    globeEl.addEventListener('pointerdown', (e) => {
+      setMapHint(false)
+      hideConfirm()
+      if (e.button !== 0 && e.button !== 1 && e.button !== 2) return
+      globeEl.setPointerCapture(e.pointerId)
+      planetMoved = false
+      if (e.shiftKey && e.button === 0 && TERRAIN_TOOLS.includes(tool)) {
+        painting = true
+        lastCell = null
+        applyAt(e.clientX, e.clientY, e.shiftKey)
+        return
+      }
+      panning = true
+      planet?.onPointerDown(e.clientX, e.clientY)
+      e.preventDefault()
+    })
+    globeEl.addEventListener('pointermove', (e) => {
+      if (painting && TERRAIN_TOOLS.includes(tool)) {
+        applyAt(e.clientX, e.clientY, e.shiftKey)
+        return
+      }
+      if (panning) {
+        planetMoved = true
+        planet?.onPointerMove(e.clientX, e.clientY)
+        return
+      }
+      hover = pickCell(e.clientX, e.clientY)
+      updateInspector()
+    })
+    globeEl.addEventListener('pointerup', (e) => {
+      if (!planetMoved && !painting && e.button === 0) {
+        applyAt(e.clientX, e.clientY, e.shiftKey)
+      }
+      planet?.onPointerUp()
+      endPointer()
+    })
+    globeEl.addEventListener('pointercancel', () => {
+      planet?.onPointerUp()
+      endPointer()
+    })
+    globeEl.addEventListener('contextmenu', (e) => e.preventDefault())
+  }
 
   document.addEventListener('pointerdown', (e) => {
     const menu = document.querySelector('#worldMenu')
@@ -1069,6 +1202,16 @@ function rasterScale(w: World): number {
 
 function paint() {
   if (!world) return
+  if (viewMode === 'planet' && planet) {
+    planet.layout()
+    planet.sync(
+      world,
+      globeLook,
+      `${world.seed}|${world.width}x${world.height}|${world.elev[0]}|${world.elev[(world.elev.length / 2) | 0]}|${world.seaLevel}|${world.biome[(world.biome.length / 2) | 0]}|${world.cities.length}|${climatePhase}`,
+    )
+    planet.render()
+    return
+  }
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
   const ctx = canvas.getContext('2d')!

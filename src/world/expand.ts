@@ -12,6 +12,21 @@ function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v))
 }
 
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = clamp((x - edge0) / Math.max(1e-6, edge1 - edge0), 0, 1)
+  return t * t * (3 - 2 * t)
+}
+
+/** Negative inside the old rect, positive outside. */
+function signedRectDist(ox: number, oy: number, ow: number, oh: number): number {
+  if (ox >= 0 && oy >= 0 && ox < ow && oy < oh) {
+    return -Math.min(ox + 0.5, oy + 0.5, ow - 0.5 - ox, oh - 0.5 - oy)
+  }
+  const dx = ox < 0 ? -ox : ox >= ow ? ox - (ow - 1) : 0
+  const dy = oy < 0 ? -oy : oy >= oh ? oy - (oh - 1) : 0
+  return Math.hypot(dx, dy)
+}
+
 /** How many extra cells are needed so the map still fills the view after a zoom-out. */
 export function padsForZoomOut(
   world: World,
@@ -36,6 +51,30 @@ export function padsForZoomOut(
     top,
     bottom: extraH - top,
   }
+}
+
+function generatePadElev(
+  gx: number,
+  gy: number,
+  seed: number,
+  sea: number,
+  land: number,
+): number {
+  const n =
+    fbm(gx / 48, gy / 48, seed, 5) * 0.55 + fbm(gx / 18, gy / 18, seed + 7, 3) * 0.25
+  const coast = (fbm(gx / 14, gy / 14, seed + 41, 4) - 0.5) * 0.08
+  let e = 0.08 + n * 0.12 + coast
+  const blob = fbm(gx / 30, gy / 26, seed + 13, 5)
+  const island = fbm(gx / 11, gy / 11, seed + 99, 4)
+  const continentThresh = 1.04 - land * 0.52
+  const islandThresh = 0.88 - land * 0.3
+  if (blob > continentThresh) {
+    const t = (blob - continentThresh) / Math.max(0.08, 1 - continentThresh)
+    e = sea + 0.04 + t * 0.26 + n * 0.12
+  } else if (island > islandThresh && n > 0.42) {
+    e = sea + 0.03 + (island - islandThresh) * 0.42 + n * 0.06
+  }
+  return clamp(e, 0, 1)
 }
 
 export function expandWorld(
@@ -80,18 +119,29 @@ export function expandWorld(
   const seed = world.seed
   const latSpan = Math.max(1, world.latRows - 1)
   const land = clampLandRatio(world.landRatio)
-  const islandThresh = 0.86 - land * 0.32
-  const continentThresh = 1.02 - land * 0.55
 
   for (let y = 0; y < nh; y++) {
     for (let x = 0; x < nw; x++) {
       const i = idx(nw, x, y)
       const ox = x - padLeft
       const oy = y - padTop
-      if (ox >= 0 && oy >= 0 && ox < ow && oy < oh) {
+      const gx = x + originX
+      const gy = y + originY
+      const warp = (fbm(gx / 15, gy / 13, seed + 21, 4) - 0.5) * 12
+      const sd = signedRectDist(ox, oy, ow, oh) + warp
+      const inside = ox >= 0 && oy >= 0 && ox < ow && oy < oh
+      const gen = generatePadElev(gx, gy, seed, sea, land)
+      const edgePlate = oldPlate[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
+
+      let e: number
+      let plate = edgePlate
+      let copied = false
+
+      if (inside && sd < -3) {
         const oi = idx(ow, ox, oy)
-        elev[i] = oldElev[oi]
-        plateId[i] = oldPlate[oi]
+        e = oldElev[oi]
+        plate = oldPlate[oi]
+        copied = true
         if (canCopyDerived) {
           temp[i] = oldTemp[oi]
           moist[i] = oldMoist[oi]
@@ -99,40 +149,32 @@ export function expandWorld(
           biome[i] = oldBiome[oi]
           suitability[i] = oldSuit[oi]
         }
-        continue
-      }
-
-      const cx = clamp(ox, 0, ow - 1)
-      const cy = clamp(oy, 0, oh - 1)
-      const edge = oldElev[idx(ow, cx, cy)]
-      const edgePlate = oldPlate[idx(ow, cx, cy)]
-      const dx = ox < 0 ? -ox : ox >= ow ? ox - (ow - 1) : 0
-      const dy = oy < 0 ? -oy : oy >= oh ? oy - (oh - 1) : 0
-      const dist = Math.hypot(dx, dy)
-      const gx = x + originX
-      const gy = y + originY
-      const n =
-        fbm(gx / 48, gy / 48, seed, 5) * 0.55 + fbm(gx / 18, gy / 18, seed + 7, 3) * 0.25
-      const coast = (fbm(gx / 14, gy / 14, seed + 41, 4) - 0.5) * 0.08
-      const shelf = Math.max(0, 1 - dist / 11)
-      let e = 0.1 + n * 0.11 + coast
-      if (edge >= sea) {
-        e = edge * (1 - dist / Math.max(6, dist)) * 0.15 + (sea - 0.05) * shelf + e * (1 - shelf * 0.55)
-        if (dist < 5) e = edge * (1 - dist / 5) + (sea - 0.03) * (dist / 5)
+      } else if (inside) {
+        const oi = idx(ow, ox, oy)
+        const oldE = oldElev[oi]
+        plate = oldPlate[oi]
+        const chew = fbm(gx / 9, gy / 9, seed + 50, 4)
+        const exposure = smoothstep(-14, 3, sd)
+        if (oldE >= sea && chew * exposure > 0.38) {
+          e = oldE * (1 - exposure * chew) + Math.min(oldE, sea - 0.05 - chew * 0.06) * exposure * chew
+        } else {
+          e = oldE * (1 - exposure * 0.35) + gen * exposure * 0.35
+        }
       } else {
-        e = edge * shelf * 0.45 + e * (1 - shelf * 0.35)
-      }
-      const island = fbm(gx / 11, gy / 11, seed + 99, 4)
-      const blob = fbm(gx / 36, gy / 36, seed + 13, 4)
-      if (blob > continentThresh && dist > 10) {
-        e = sea + 0.06 + n * 0.2 + (blob - continentThresh) * 0.45
-      } else if (island > islandThresh && dist > 12 && n > 0.48) {
-        e = sea + 0.05 + (island - islandThresh) * 0.5 + n * 0.08
+        e = gen
+        const blend = 1 - smoothstep(2, 16, sd)
+        if (blend > 0.02) {
+          const near = oldElev[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
+          const shelfMix = blend * blend * 0.28
+          e = e * (1 - shelfMix) + Math.min(near, sea - 0.02) * shelfMix
+        }
       }
 
-      e = Math.max(0, Math.min(1, e))
+      e = clamp(e, 0, 1)
       elev[i] = e
-      plateId[i] = edgePlate
+      plateId[i] = plate
+
+      if (copied) continue
 
       const lat = Math.max(0, Math.min(1, gy / latSpan))
       const latTemp = 1 - Math.pow(Math.abs(lat - 0.5) * 2, 1.15)

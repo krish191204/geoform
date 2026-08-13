@@ -139,6 +139,28 @@ function buildElevation(
   return elev
 }
 
+/** Irregular ocean around the domain so continents don't fill a rectangle. */
+function applyNoisyOceanMargins(
+  elev: Float32Array,
+  w: number,
+  h: number,
+  seed: number,
+): void {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = idx(w, x, y)
+      const nx = w <= 1 ? 0.5 : x / (w - 1)
+      const ny = h <= 1 ? 0.5 : y / (h - 1)
+      const edge = Math.min(nx, 1 - nx, ny * 1.2, (1 - ny) * 1.2)
+      const warp = (fbm(x / 16, y / 13, seed + 61, 4) - 0.5) * 0.12
+      const fade = Math.max(0, Math.min(1, (edge + warp - 0.02) / 0.12))
+      const smooth = fade * fade * (3 - 2 * fade)
+      const ocean = 0.07 + fbm(x / 10, y / 10, seed + 77, 3) * 0.1
+      elev[i] = ocean * (1 - smooth) + elev[i] * smooth
+    }
+  }
+}
+
 const CITY_NAMES = [
   'Ashmere',
   'Korrin',
@@ -196,10 +218,12 @@ export function generateWorld(
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = idx(width, x, y)
-      const edgeNoise = (fbm(x / 14, y / 14, seed + 41, 4) - 0.5) * 0.08
+      const edgeNoise = (fbm(x / 12, y / 12, seed + 41, 5) - 0.5) * 0.12
       elev[i] = Math.max(0, Math.min(1, elev[i] + edgeNoise))
     }
   }
+
+  applyNoisyOceanMargins(elev, width, height, seed)
 
   const seaLevel = 0.44
 
