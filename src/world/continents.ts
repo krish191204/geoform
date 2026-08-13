@@ -1,4 +1,5 @@
 import { recomputeDerived } from './climate'
+import { chewStraightCoasts } from './coasts'
 import { ensurePlateMotion, sculptOrogeny } from './geography'
 import { fbm } from './noise'
 import type { World } from './types'
@@ -262,12 +263,16 @@ export function addContinent(
     for (let x = 0; x < w; x++) {
       const dx = wrapDx(x - cx, w)
       const dy = y - cy
-      const wx = dx + (fbm(x / 22, y / 22, world.seed + 11, 3) - 0.5) * r * 0.55
-      const wy = dy + (fbm(x / 22, y / 22, world.seed + 29, 3) - 0.5) * r * 0.45
+      const wx = dx + (fbm(x / 16, y / 14, world.seed + 11, 4) - 0.5) * r * 1.15
+      const wy = dy + (fbm(x / 14, y / 16, world.seed + 29, 4) - 0.5) * r * 0.95
       const along = wx * ax + wy * ay
       const across = wx * px + wy * py
       const e2 = (along / rx) * (along / rx) + (across / ry) * (across / ry)
-      if (e2 > 1) continue
+      const coast = fbm(x / 8, y / 8, world.seed + 63, 4)
+      const gulfs = fbm(x / 6, y / 6, world.seed + 81, 3)
+      if (e2 > 0.72 + coast * 0.55) continue
+      if (e2 > 0.28 && gulfs < 0.32) continue
+      if (style === 'archipelago' && coast < 0.48) continue
       mask[idx(w, x, y)] = 1
       claimed++
     }
@@ -284,7 +289,8 @@ export function addContinent(
     const n =
       fbm(x / 36, y / 36, world.seed + 4, 4) * 0.55 + fbm(x / 14, y / 14, world.seed + 8, 3) * 0.25
     const t = 1 - Math.min(1, Math.hypot(wrapDx(x - cx, w) / rx, (y - cy) / ry))
-    let height = seaLevel + 0.06 + n * 0.18 + t * 0.08
+    const ragged = (fbm(x / 9, y / 8, world.seed + 14, 4) - 0.5) * 0.08
+    let height = seaLevel + 0.05 + n * 0.18 + t * 0.07 + ragged
 
     if (style === 'collision') height = seaLevel + 0.1 + n * 0.22 + t * 0.14
     if (style === 'rift') height = seaLevel + 0.05 + n * 0.12 + t * 0.04
@@ -381,6 +387,7 @@ export function addContinent(
   }
 
   smoothLocal(world, style === 'archipelago' ? 1 : 2)
+  chewStraightCoasts(world.elev, w, h, seaLevel, world.seed + 17)
 
   world.plateCount = newId + 1
   ensurePlateMotion(world)

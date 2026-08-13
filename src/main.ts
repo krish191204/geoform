@@ -22,6 +22,7 @@ import {
 } from './world/tools'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { expandWorld, padsForZoomOut } from './world/expand'
+import { chewStraightCoasts } from './world/coasts'
 import { refreshGeography } from './world/geography'
 import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
@@ -742,6 +743,13 @@ function beginStroke(label: string) {
 function endStroke() {
   if (!strokeActive) return
   strokeActive = false
+  if (
+    world &&
+    (tool === 'land' || tool === 'sea' || tool === 'raise' || tool === 'lower' || tool === 'plateau')
+  ) {
+    chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21)
+    renderer.invalidate()
+  }
   setClimatePhase('updating')
   scheduleClimateRecompute()
 }

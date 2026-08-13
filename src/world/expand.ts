@@ -1,4 +1,5 @@
 import { classifyBiome } from './climate'
+import { chewStraightCoasts } from './coasts'
 import { clampLandRatio } from './land'
 import { fbm } from './noise'
 import type { World } from './types'
@@ -85,8 +86,8 @@ function generatePadElev(
   let e = 0.08 + n * 0.12 + coast
   const blob = fbm(gx / 30, gy / 26, seed + 13, 5)
   const island = fbm(gx / 11, gy / 11, seed + 99, 4)
-  const continentThresh = 1.04 - land * 0.52
-  const islandThresh = 0.88 - land * 0.3
+  const continentThresh = 1.14 - land * 0.28
+  const islandThresh = 0.94 - land * 0.16
   if (blob > continentThresh) {
     const t = (blob - continentThresh) / Math.max(0.08, 1 - continentThresh)
     e = sea + 0.04 + t * 0.26 + n * 0.12
@@ -138,6 +139,10 @@ export function expandWorld(
   const seed = world.seed
   const latSpan = Math.max(1, world.latRows - 1)
   const land = clampLandRatio(world.landRatio)
+  const short = Math.min(ow, oh)
+  const warpAmp = Math.min(28, Math.max(4, short * 0.18))
+  const copyDepth = -Math.min(22, Math.max(3, short * 0.14))
+  const chewLo = -Math.min(32, Math.max(8, short * 0.22))
 
   for (let y = 0; y < nh; y++) {
     for (let x = 0; x < nw; x++) {
@@ -146,7 +151,7 @@ export function expandWorld(
       const oy = y - padTop
       const gx = x + originX
       const gy = y + originY
-      const warp = (fbm(gx / 15, gy / 13, seed + 21, 4) - 0.5) * 12
+      const warp = (fbm(gx / 11, gy / 9, seed + 21, 4) - 0.5) * warpAmp
       const sd = signedRectDist(ox, oy, ow, oh) + warp
       const inside = ox >= 0 && oy >= 0 && ox < ow && oy < oh
       const gen = generatePadElev(gx, gy, seed, sea, land)
@@ -156,7 +161,7 @@ export function expandWorld(
       let plate = edgePlate
       let copied = false
 
-      if (inside && sd < -3) {
+      if (inside && sd < copyDepth) {
         const oi = idx(ow, ox, oy)
         e = oldElev[oi]
         plate = oldPlate[oi]
@@ -172,20 +177,20 @@ export function expandWorld(
         const oi = idx(ow, ox, oy)
         const oldE = oldElev[oi]
         plate = oldPlate[oi]
-        const chew = fbm(gx / 9, gy / 9, seed + 50, 4)
-        const exposure = smoothstep(-14, 3, sd)
-        if (oldE >= sea && chew * exposure > 0.38) {
-          e = oldE * (1 - exposure * chew) + Math.min(oldE, sea - 0.05 - chew * 0.06) * exposure * chew
+        const chew = fbm(gx / 8, gy / 8, seed + 50, 4)
+        const exposure = smoothstep(chewLo, 6, sd)
+        if (oldE >= sea && chew * exposure > 0.28) {
+          e = oldE * (1 - exposure * chew) + Math.min(oldE, sea - 0.06 - chew * 0.08) * exposure * chew
         } else {
-          e = oldE * (1 - exposure * 0.35) + gen * exposure * 0.35
+          e = oldE * (1 - exposure * 0.55) + gen * exposure * 0.55
         }
       } else {
         e = gen
-        const blend = 1 - smoothstep(2, 16, sd)
+        const blend = 1 - smoothstep(1, Math.max(8, warpAmp * 0.8), sd)
         if (blend > 0.02) {
           const near = oldElev[idx(ow, clamp(ox, 0, ow - 1), clamp(oy, 0, oh - 1))]
-          const shelfMix = blend * blend * 0.28
-          e = e * (1 - shelfMix) + Math.min(near, sea - 0.02) * shelfMix
+          const shelfMix = blend * blend * 0.18
+          e = e * (1 - shelfMix) + Math.min(near, sea - 0.03) * shelfMix
         }
       }
 
@@ -224,5 +229,6 @@ export function expandWorld(
     c.x += padLeft
     c.y += padTop
   }
+  chewStraightCoasts(world.elev, nw, nh, sea, seed + 33)
   return true
 }
