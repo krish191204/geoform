@@ -188,6 +188,9 @@ export function expandWorld(
       // Deep inside the old map: copy height as-is.
       // Near the old edge: chew the coast so the seam is not a rectangle.
       // Outside: invent new height, blend toward nearby land if we want continents.
+      let e: number
+      let plate = edgePlate
+      let copied = false
 
       if (inside && sd < copyDepth) {
         const oi = idx(ow, ox, oy)
