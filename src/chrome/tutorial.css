@@ -12,19 +12,30 @@
     radial-gradient(900px 500px at 20% 10%, rgba(200, 210, 200, 0.35), transparent 55%),
     rgba(18, 24, 20, 0.72);
   backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /**
- * Paint practice: do NOT cover the map.
- * Full-screen root is click-through; only a slim docked card catches clicks.
+ * Paint practice: overlay must not cover the atlas at all.
+ * A full-screen layer (even transparent) still blurs the map in Safari/Chrome.
  */
 .tutorial-root[data-mode='practice'] {
-  display: block;
-  background: transparent;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  inset: auto;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: auto;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 0 0.75rem 0.75rem;
+  background: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
   pointer-events: none;
-  padding: 0;
 }
 
 .tutorial-root[data-mode='practice'] .tutorial-card {
@@ -213,25 +224,35 @@
   }
 }
 
-#app.tutorial-locked .chrome,
-#app.tutorial-locked .panel,
-#app.tutorial-locked .map-overlay,
-#app.tutorial-locked .map-hud {
+#app.tutorial-locked:not(.tutorial-practice) .chrome,
+#app.tutorial-locked:not(.tutorial-practice) .panel,
+#app.tutorial-locked:not(.tutorial-practice) .map-overlay,
+#app.tutorial-locked:not(.tutorial-practice) .map-hud {
   pointer-events: none;
   filter: grayscale(0.25) brightness(0.92);
 }
 
 #app.tutorial-locked.tutorial-practice .chrome,
 #app.tutorial-locked.tutorial-practice .panel {
-  filter: grayscale(0.35) brightness(0.88);
-  opacity: 0.55;
+  pointer-events: none;
+  opacity: 0.72;
+  filter: none;
+}
+
+#app.tutorial-locked.tutorial-practice .map-shell,
+#app.tutorial-locked.tutorial-practice .map-viewport,
+#app.tutorial-locked.tutorial-practice #map,
+#app.tutorial-locked.tutorial-practice .map-overlay,
+#app.tutorial-locked.tutorial-practice .map-hud {
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  opacity: 1;
 }
 
 #app.tutorial-locked.tutorial-practice .map-viewport,
 #app.tutorial-locked.tutorial-practice #map {
   pointer-events: auto;
-  filter: none;
-  opacity: 1;
 }
 
 #app.tutorial-locked.tutorial-practice .map-shell {
@@ -243,7 +264,11 @@
   position: relative;
 }
 
+#app.tutorial-locked.tutorial-practice .map-shell::after {
+  display: none;
+}
+
 #app.tutorial-locked.tutorial-practice .map-hud {
   pointer-events: none;
-  opacity: 0.35;
+  opacity: 0.85;
 }
