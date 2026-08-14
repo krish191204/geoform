@@ -182,17 +182,17 @@
 /* Big “paint here” badge on the map during practice */
 .tutorial-map-beacon {
   position: absolute;
-  top: 0.85rem;
+  top: 10%;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 6;
   pointer-events: none;
-  padding: 0.55rem 1rem;
+  padding: 0.5rem 0.95rem;
   border-radius: 999px;
-  background: rgba(184, 90, 42, 0.95);
+  background: rgba(184, 90, 42, 0.96);
   color: #fff8f0;
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   letter-spacing: 0.02em;
   box-shadow: 0 10px 28px rgba(20, 24, 20, 0.35);
   white-space: nowrap;
@@ -256,19 +256,23 @@
 }
 
 #app.tutorial-locked.tutorial-practice .map-shell {
-  outline: 4px solid rgba(184, 90, 42, 0.95);
-  outline-offset: -2px;
-  border-radius: 12px;
-  box-shadow: 0 0 0 8px rgba(184, 90, 42, 0.2);
-  z-index: 3;
-  position: relative;
+  outline: none;
+  box-shadow: none;
+}
+
+#app.tutorial-locked.tutorial-practice .map-stage {
+  outline: 5px solid rgba(184, 90, 42, 0.98);
+  outline-offset: 3px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 10px rgba(184, 90, 42, 0.22);
+  z-index: 4;
 }
 
 #app.tutorial-locked.tutorial-practice .map-shell::after {
   display: none;
 }
 
-#app.tutorial-locked.tutorial-practice .map-hud {
-  pointer-events: none;
-  opacity: 0.85;
+#app.tutorial-locked.tutorial-practice .map-hud,
+#app.tutorial-locked.tutorial-practice .map-overlay {
+  opacity: 0.25;
 }

@@ -718,7 +718,9 @@ function renderShell() {
 
       <section class="map-shell">
         <div class="map-viewport" id="mapViewport">
-          <canvas id="map"></canvas>
+          <div class="map-stage" id="mapStage">
+            <canvas id="map"></canvas>
+          </div>
           <canvas id="globe" hidden></canvas>
         </div>
         <div class="map-overlay" id="layers"></div>
@@ -764,8 +766,8 @@ function tutorialHooks() {
     setStatus,
     onComplete: () => showCoach(coachTool(tool)),
     setMapBeacon: (on: boolean) => {
-      const shell = document.querySelector('.map-shell')
-      if (!shell) return
+      const stage = document.querySelector('#mapStage')
+      if (!stage) return
       let beacon = document.querySelector<HTMLElement>('#tutorialMapBeacon')
       if (!on) {
         beacon?.remove()
@@ -775,9 +777,9 @@ function tutorialHooks() {
         beacon = document.createElement('div')
         beacon.id = 'tutorialMapBeacon'
         beacon.className = 'tutorial-map-beacon'
-        shell.appendChild(beacon)
+        stage.appendChild(beacon)
       }
-      beacon.innerHTML = `Paint here ↓<small>Drag on green / brown land</small>`
+      beacon.innerHTML = `Paint here ↓<small>On this picture — green / brown land</small>`
     },
   }
 }

@@ -37,8 +37,8 @@ const STEPS: Step[] = [
   },
   {
     id: 'paint',
-    title: 'Paint on the glowing map',
-    body: 'The orange box is the map — drag Raise on green/brown land there. This card stays out of the way at the bottom.',
+    title: 'Paint on the glowing picture',
+    body: 'The orange box is the actual map (green land, blue sea). Drag Raise on the land inside that box — not the dark empty frame around it.',
     bullets: ['Skip deep ocean for this try.', 'Release when done — then Continue unlocks.'],
     requirePaint: true,
     cta: 'I painted — finish',
@@ -154,7 +154,7 @@ function renderStep(): void {
       ${bullets}
       ${
         needPaint
-          ? `<p class="tutorial-wait">↑ Drag on the orange-outlined map above. Continue unlocks after you paint.</p>`
+          ? `<p class="tutorial-wait">↑ Drag on the orange-outlined picture (the land). Continue unlocks after you paint.</p>`
           : ''
       }
       <div class="tutorial-actions">
