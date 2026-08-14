@@ -839,6 +839,8 @@ button.primary:hover {
 #directorRun {
   justify-self: start;
 }
+
+.city-list {
   margin: 0.5rem 0 0;
   padding: 0;
   list-style: none;
