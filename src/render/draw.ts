@@ -335,6 +335,11 @@ export interface DrawOptions {
   painting?: boolean
   /** Fade river overlay while climate is stale / recomputing */
   riversMuted?: boolean
+  /**
+   * For city / continent / raze: true = green ring (allowed), false = red (blocked),
+   * null = normal brush colors.
+   */
+  placeOk?: boolean | null
 }
 
 interface WindParticle {
@@ -522,7 +527,7 @@ export class MapRenderer {
       ctx.restore()
     }
 
-    // Brush preview
+    // Brush preview — red when a stamp would be refused, green when allowed.
     if (
       opts.hover &&
       opts.tool &&
@@ -531,23 +536,61 @@ export class MapRenderer {
       const { x, y } = opts.hover
       const r = (opts.brush ?? 6) * scale
       const isCarve = opts.tool === 'lower' || opts.tool === 'channel' || opts.tool === 'sea'
-      const isCity = opts.tool === 'city' || opts.tool === 'razecity'
+      const isStamp =
+        opts.tool === 'city' || opts.tool === 'razecity' || opts.tool === 'continent'
+      const placeOk = opts.placeOk
       ctx.save()
       ctx.beginPath()
-      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, isCity ? Math.max(10, r * 0.45) : r, 0, Math.PI * 2)
-      ctx.strokeStyle = isCarve
-        ? 'rgba(180,70,40,0.9)'
-        : opts.tool === 'razecity'
-          ? 'rgba(160,40,40,0.9)'
-          : opts.tool === 'smooth' || opts.tool === 'plateau'
-            ? 'rgba(90,140,160,0.9)'
-            : 'rgba(243,238,220,0.92)'
+      ctx.arc(
+        (x + 0.5) * scale,
+        (y + 0.5) * scale,
+        isStamp ? Math.max(10, r * 0.45) : r,
+        0,
+        Math.PI * 2,
+      )
+      let stroke = 'rgba(243,238,220,0.92)'
+      let fill = 'rgba(243,238,220,0.07)'
+      if (placeOk === false) {
+        stroke = 'rgba(176,48,40,0.95)'
+        fill = 'rgba(176,48,40,0.14)'
+      } else if (placeOk === true) {
+        stroke = 'rgba(54,120,72,0.95)'
+        fill = 'rgba(54,120,72,0.12)'
+      } else if (isCarve) {
+        stroke = 'rgba(180,70,40,0.9)'
+        fill = 'rgba(180,70,40,0.08)'
+      } else if (opts.tool === 'smooth' || opts.tool === 'plateau') {
+        stroke = 'rgba(90,140,160,0.9)'
+        fill = 'rgba(90,140,160,0.08)'
+      }
+      ctx.strokeStyle = stroke
       ctx.lineWidth = opts.painting ? 2.5 : 1.6
-      ctx.setLineDash(isCity ? [5, 4] : opts.tool === 'ridge' || opts.tool === 'channel' ? [6, 3] : [])
+      ctx.setLineDash(
+        isStamp
+          ? placeOk === false
+            ? [3, 4]
+            : [5, 4]
+          : opts.tool === 'ridge' || opts.tool === 'channel'
+            ? [6, 3]
+            : [],
+      )
       ctx.stroke()
-      if (!isCity) {
-        ctx.fillStyle = isCarve ? 'rgba(180,70,40,0.08)' : 'rgba(243,238,220,0.07)'
-        ctx.fill()
+      ctx.fillStyle = fill
+      ctx.fill()
+      // Tiny X when blocked so it reads even without color.
+      if (placeOk === false) {
+        const cx = (x + 0.5) * scale
+        const cy = (y + 0.5) * scale
+        const arm = Math.max(5, r * 0.22)
+        ctx.beginPath()
+        ctx.moveTo(cx - arm, cy - arm)
+        ctx.lineTo(cx + arm, cy + arm)
+        ctx.moveTo(cx + arm, cy - arm)
+        ctx.lineTo(cx - arm, cy + arm)
+        ctx.strokeStyle = 'rgba(176,48,40,0.95)'
+        ctx.lineWidth = 2
+        ctx.setLineDash([])
+        ctx.stroke()
       }
       ctx.restore()
     }

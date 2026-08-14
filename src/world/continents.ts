@@ -236,6 +236,13 @@ export function addContinent(
   radius: number,
 ): { ok: boolean; message: string } {
   const { width: w, height: h, elev, plateId, seaLevel } = world
+  // Continents grow from the sea. Stamping on land stacks nonsense mountains.
+  if (cx < 0 || cy < 0 || cx >= w || cy >= h || elev[cy * w + cx] >= seaLevel) {
+    return {
+      ok: false,
+      message: 'Click open ocean — new continents grow from the sea, not on existing land.',
+    }
+  }
   const r = Math.max(12, Math.min(52, radius))
   let maxId = 0
   for (let i = 0; i < plateId.length; i++) maxId = Math.max(maxId, plateId[i])
