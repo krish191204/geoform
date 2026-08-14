@@ -456,80 +456,6 @@ function strokeRoute(
   ctx.restore()
 }
 
-/** Soft hazard wash — bilinear upsample so the overlay is not chunky cell squares. */
-function drawSeaHazards(
-  ctx: CanvasRenderingContext2D,
-  world: World,
-  scale: number,
-) {
-  const { width: w, height: h, seaLevel, elev } = world
-  const cw = w * scale
-  const ch = h * scale
-  const image = new ImageData(cw, ch)
-  const data = image.data
-
-  const sample = (x: number, y: number): [number, number, number, number] => {
-    if (y < 0 || y >= h || elev[y * w + x] >= seaLevel) return [0, 0, 0, 0]
-    return HAZARD_TINT[classifySeaCell(world, x, y)]
-  }
-
-  const mixA = (
-    a: [number, number, number, number],
-    b: [number, number, number, number],
-    t: number,
-  ): [number, number, number, number] => [
-    a[0] + (b[0] - a[0]) * t,
-    a[1] + (b[1] - a[1]) * t,
-    a[2] + (b[2] - a[2]) * t,
-    a[3] + (b[3] - a[3]) * t,
-  ]
-
-  for (let py = 0; py < ch; py++) {
-    const yf = py / scale
-    const y0 = Math.min(h - 1, yf | 0)
-    const y1 = Math.min(h - 1, y0 + 1)
-    const fy = yf - y0
-    for (let px = 0; px < cw; px++) {
-      const xf = px / scale
-      const x0 = wrapX(xf | 0, w)
-      const x1 = wrapX((xf | 0) + 1, w)
-      const fx = xf - (xf | 0)
-      const c00 = sample(x0, y0)
-      const c10 = sample(x1, y0)
-      const c01 = sample(x0, y1)
-      const c11 = sample(x1, y1)
-      const top = mixA(c00, c10, fx)
-      const bot = mixA(c01, c11, fx)
-      const [r, g, b, a] = mixA(top, bot, fy)
-      const o = (py * cw + px) * 4
-      data[o] = clamp(r)
-      data[o + 1] = clamp(g)
-      data[o + 2] = clamp(b)
-      data[o + 3] = clamp(a * 255)
-    }
-  }
-
-  ctx.save()
-  // putImageData replaces pixels (punches holes in land). drawImage alpha-blends.
-  const layer =
-    typeof OffscreenCanvas !== 'undefined'
-      ? new OffscreenCanvas(cw, ch)
-      : (() => {
-          const c = document.createElement('canvas')
-          c.width = cw
-          c.height = ch
-          return c
-        })()
-  const layerCtx = layer.getContext('2d')
-  if (!layerCtx) {
-    ctx.restore()
-    return
-  }
-  layerCtx.putImageData(image, 0, 0)
-  ctx.drawImage(layer as CanvasImageSource, 0, 0)
-  ctx.restore()
-}
-
 function wrapX(x: number, w: number): number {
   return ((x % w) + w) % w
 }
@@ -565,11 +491,137 @@ export class MapRenderer {
 
   private shimmerBuf: ImageData | null = null
   private shimmerFrame = 0
+  private hazardKey = ''
+  private hazardLayer: OffscreenCanvas | HTMLCanvasElement | null = null
 
   invalidate() {
     this.cacheKey = ''
     this.base = null
     this.shimmerBuf = null
+    this.hazardKey = ''
+    this.hazardLayer = null
+  }
+
+  /** Patch only the brush footprint — avoids a full atlas rebuild on every dab. */
+  patchRegion(world: World, opts: DrawOptions, cx: number, cy: number, brushR: number) {
+    const scale = opts.scale ?? this.scale
+    this.scale = scale
+    const { width: w, height: h } = world
+    const cw = w * scale
+    const ch = h * scale
+    const riverAmt = opts.showRivers ? (opts.riversMuted ? 0.28 : 1) : 0
+
+    if (!this.base || this.base.width !== cw || this.base.height !== ch) {
+      this.rebuildBase(world, opts, 0)
+      this.cacheKey = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
+      return
+    }
+
+    const pad = brushR + 2
+    const px0 = Math.max(0, Math.floor((cx - pad) * scale))
+    const py0 = Math.max(0, Math.floor((cy - pad) * scale))
+    const px1 = Math.min(cw - 1, Math.ceil((cx + pad + 1) * scale))
+    const py1 = Math.min(ch - 1, Math.ceil((cy + pad + 1) * scale))
+    const data = this.base.data
+
+    for (let py = py0; py <= py1; py++) {
+      const yf = py / scale
+      const y0 = Math.min(h - 1, yf | 0)
+      const y1 = Math.min(h - 1, y0 + 1)
+      const fy = yf - y0
+      for (let px = px0; px <= px1; px++) {
+        const xf = px / scale
+        const x0 = Math.min(w - 1, xf | 0)
+        const x1 = Math.min(w - 1, x0 + 1)
+        const fx = xf - x0
+
+        const c00 = cellColor(world, opts.layer, x0, y0, riverAmt, 0)
+        const c10 = cellColor(world, opts.layer, x1, y0, riverAmt, 0)
+        const c01 = cellColor(world, opts.layer, x0, y1, riverAmt, 0)
+        const c11 = cellColor(world, opts.layer, x1, y1, riverAmt, 0)
+        const top = mix(c00, c10, fx)
+        const bot = mix(c01, c11, fx)
+        const [r, g, b] = mix(top, bot, fy)
+
+        const o = (py * cw + px) * 4
+        data[o] = r
+        data[o + 1] = g
+        data[o + 2] = b
+        data[o + 3] = 255
+      }
+    }
+
+    this.shimmerBuf = null
+    this.hazardKey = ''
+    this.hazardLayer = null
+  }
+
+  private ensureHazardLayer(world: World, scale: number): CanvasImageSource | null {
+    const key = `${hashWorld(world)}|${scale}|${world.tradeRoutes.length}`
+    if (key === this.hazardKey && this.hazardLayer) return this.hazardLayer
+
+    const { width: w, height: h, seaLevel, elev } = world
+    const cw = w * scale
+    const ch = h * scale
+    const image = new ImageData(cw, ch)
+    const data = image.data
+
+    const sample = (x: number, y: number): [number, number, number, number] => {
+      if (y < 0 || y >= h || elev[y * w + x] >= seaLevel) return [0, 0, 0, 0]
+      return HAZARD_TINT[classifySeaCell(world, x, y)]
+    }
+
+    const mixA = (
+      a: [number, number, number, number],
+      b: [number, number, number, number],
+      t: number,
+    ): [number, number, number, number] => [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+      a[3] + (b[3] - a[3]) * t,
+    ]
+
+    for (let py = 0; py < ch; py++) {
+      const yf = py / scale
+      const y0 = Math.min(h - 1, yf | 0)
+      const y1 = Math.min(h - 1, y0 + 1)
+      const fy = yf - y0
+      for (let px = 0; px < cw; px++) {
+        const xf = px / scale
+        const x0 = wrapX(xf | 0, w)
+        const x1 = wrapX((xf | 0) + 1, w)
+        const fx = xf - (xf | 0)
+        const c00 = sample(x0, y0)
+        const c10 = sample(x1, y0)
+        const c01 = sample(x0, y1)
+        const c11 = sample(x1, y1)
+        const top = mixA(c00, c10, fx)
+        const bot = mixA(c01, c11, fx)
+        const [r, g, b, a] = mixA(top, bot, fy)
+        const o = (py * cw + px) * 4
+        data[o] = clamp(r)
+        data[o + 1] = clamp(g)
+        data[o + 2] = clamp(b)
+        data[o + 3] = clamp(a * 255)
+      }
+    }
+
+    const layer =
+      typeof OffscreenCanvas !== 'undefined'
+        ? new OffscreenCanvas(cw, ch)
+        : (() => {
+            const c = document.createElement('canvas')
+            c.width = cw
+            c.height = ch
+            return c
+          })()
+    const layerCtx = layer.getContext('2d')
+    if (!layerCtx) return null
+    layerCtx.putImageData(image, 0, 0)
+    this.hazardKey = key
+    this.hazardLayer = layer
+    return layer
   }
 
   private ensureParticles(w: number, h: number) {
@@ -648,11 +700,17 @@ export class MapRenderer {
       ctx.canvas.height = ch
     }
 
-    // Rebuild when world/layer changes — not every shimmer tick
-    const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
-    if (key !== this.cacheKey || !this.base) {
+    // During a paint stroke, patchRegion updates this.base — skip full rebuild until release.
+    if (!opts.painting) {
+      const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
+      if (key !== this.cacheKey || !this.base) {
+        this.rebuildBase(world, opts, 0)
+        this.cacheKey = key
+        this.hazardKey = ''
+        this.hazardLayer = null
+      }
+    } else if (!this.base) {
       this.rebuildBase(world, opts, 0)
-      this.cacheKey = key
     }
 
     ctx.putImageData(this.base!, 0, 0)
@@ -661,8 +719,9 @@ export class MapRenderer {
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
 
-    // Throttled water shimmer (every 3rd frame) — keeps motion without melting the CPU
+    // Throttled water shimmer (every 3rd frame) — skip while dragging a brush
     if (
+      !opts.painting &&
       !reduceMotion &&
       (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation')
     ) {
@@ -697,7 +756,11 @@ export class MapRenderer {
     }
 
     // Wind streamers (moisture / relief)
-    if (!reduceMotion && (opts.layer === 'moisture' || opts.layer === 'relief')) {
+    if (
+      !opts.painting &&
+      !reduceMotion &&
+      (opts.layer === 'moisture' || opts.layer === 'relief')
+    ) {
       this.ensureParticles(world.width, world.height)
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
@@ -790,9 +853,14 @@ export class MapRenderer {
       ctx.restore()
     }
 
-    // Maritime trade routes + sea hazard overlay
+    // Maritime trade routes + sea hazard overlay (cached until world changes)
     if (opts.showTradeRoutes) {
-      drawSeaHazards(ctx, world, scale)
+      const hazard = this.ensureHazardLayer(world, scale)
+      if (hazard) {
+        ctx.save()
+        ctx.drawImage(hazard, 0, 0)
+        ctx.restore()
+      }
       for (const route of world.tradeRoutes) {
         strokeRoute(ctx, route.waypoints, scale, route.hazard, world.width)
       }

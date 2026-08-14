@@ -121,7 +121,7 @@ import {
 } from './world/tradeRoutes'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
-import { PlanetView } from './render/globe'
+import type { PlanetView } from './render/globe'
 import type { Layer, Tool, World } from './world/types'
 
 let mapQuality: MapQuality = loadMapQuality()
@@ -176,6 +176,8 @@ let viewPanY = 0
 let viewMode: 'atlas' | 'planet' = 'atlas'
 let globeLook: MapLook = 'relief'
 let planet: PlanetView | null = null
+let planetLoad: Promise<PlanetView | null> | null = null
+let planetLayout = { w: 0, h: 0 }
 let panning = false
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let spaceDown = false
@@ -189,6 +191,83 @@ let settlementCoveragePct = 35
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
+let loopActive = false
+let inspectorTimer: number | null = null
+
+async function ensurePlanetView(): Promise<PlanetView | null> {
+  const globeCanvas = document.querySelector<HTMLCanvasElement>('#globe')
+  if (!globeCanvas) return null
+  if (planet) return planet
+  if (planetLoad) return planetLoad
+  planetLoad = import('./render/globe').then(({ PlanetView }) => {
+    planet = new PlanetView(globeCanvas, QUALITY_PRESETS[mapQuality])
+    planetLoad = null
+    return planet
+  })
+  return planetLoad
+}
+
+function layoutPlanetIfNeeded() {
+  if (!planet) return
+  const globeCanvas = document.querySelector<HTMLCanvasElement>('#globe')
+  const parent = globeCanvas?.parentElement
+  const w = Math.max(1, parent?.clientWidth ?? globeCanvas?.clientWidth ?? 0)
+  const h = Math.max(1, parent?.clientHeight ?? globeCanvas?.clientHeight ?? 0)
+  if (w === planetLayout.w && h === planetLayout.h) return
+  planetLayout = { w, h }
+  planet.layout()
+}
+
+function wantsContinuousAnimation(): boolean {
+  if (!world || painting) return false
+  if (
+    typeof window !== 'undefined' &&
+    (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  ) {
+    return false
+  }
+  if (viewMode === 'atlas') {
+    if (
+      layer === 'relief' ||
+      layer === 'biome' ||
+      layer === 'elevation' ||
+      layer === 'moisture'
+    ) {
+      return true
+    }
+    return timelineAge < 8 && world.cities.length > 0
+  }
+  return false
+}
+
+function requestRender() {
+  if (loopActive) return
+  loopActive = true
+  raf = requestAnimationFrame(tick)
+}
+
+function invalidateRenderer() {
+  renderer.invalidate()
+  requestRender()
+}
+
+function tick() {
+  paint()
+  if (wantsContinuousAnimation()) {
+    raf = requestAnimationFrame(tick)
+  } else {
+    loopActive = false
+  }
+}
+
+function scheduleInspectorUpdate() {
+  if (inspectorTimer !== null) return
+  inspectorTimer = window.setTimeout(() => {
+    inspectorTimer = null
+    updateInspector()
+    requestRender()
+  }, 80)
+}
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
@@ -202,7 +281,7 @@ function scheduleAutosave() {
     const stamp = new Date().toLocaleTimeString()
     const el = document.querySelector('#saveMeta')
     if (el) el.textContent = `Autosaved ${stamp}`
-  }, 400)
+  }, 2000)
 }
 
 function setStatus(msg: string) {
@@ -285,7 +364,7 @@ function applyWorld(next: World, message: string) {
   } else {
     refreshGeography(next, { sculpt: false })
   }
-  renderer.invalidate()
+  invalidateRenderer()
   announceChange(
     'A new planet is on the map',
     `${message} This replaced the previous world. Rivers and plants were calculated from the new heights — they were not drawn by hand.`,
@@ -355,12 +434,17 @@ function setViewMode(mode: 'atlas' | 'planet') {
   document.querySelector('#viewPlanet')?.classList.toggle('active', mode === 'planet')
   if (mode === 'planet') {
     if (isLayerLook(layer)) globeLook = layer
-    planet?.layout()
-    renderer.invalidate()
+    void ensurePlanetView().then((p) => {
+      if (!p) return
+      planetLayout = { w: 0, h: 0 }
+      layoutPlanetIfNeeded()
+      invalidateRenderer()
+    })
     showCoach(coachView('planet'))
   } else {
     if (isLayerLook(globeLook)) layer = globeLook
     showCoach(coachView('atlas'))
+    requestRender()
   }
   renderLayerChips()
   applyViewTransform()
@@ -408,7 +492,7 @@ function renderLayerChips() {
         globeLook = next
         if (layer === 'suitability' && world) recomputeSuitability(world)
       }
-      renderer.invalidate()
+      invalidateRenderer()
       planet?.setLook(globeLook)
       showCoach(coachLayer(viewMode === 'planet' ? globeLook : layer))
       renderLayerChips()
@@ -457,12 +541,12 @@ function setTimelineAge(age: number) {
   syncTimelineUi()
   if (!world || timelineAge < 0.5) {
     timelineView = null
-    renderer.invalidate()
+    invalidateRenderer()
     showCoach(coachTimeline(0))
     return
   }
   timelineView = reconstructPast(world, timelineAge)
-  renderer.invalidate()
+  invalidateRenderer()
   updateInspector()
   showCoach(coachTimeline(timelineAge))
 }
@@ -546,7 +630,7 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   } catch {
     recomputeDerived(world)
   }
-  renderer.invalidate()
+  invalidateRenderer()
   setClimatePhase('idle')
   updateCities()
   updateSettlementDensityHint()
@@ -612,7 +696,7 @@ function setClimatePhase(next: 'idle' | 'painting' | 'updating') {
     return
   }
   climatePhase = next
-  renderer.invalidate()
+  invalidateRenderer()
   syncClimateHud()
 }
 
@@ -1109,7 +1193,7 @@ function scheduleClimateRecompute(immediate = false) {
       // Climate only — do not reshape continents after every brush stroke.
       recomputeDerived(world)
       if (timelineAge > 0.5) timelineView = reconstructPast(world, timelineAge)
-      renderer.invalidate()
+      invalidateRenderer()
       scheduleAutosave()
       announceChange()
       setClimatePhase('idle')
@@ -1126,7 +1210,7 @@ function scheduleClimateRecompute(immediate = false) {
       ensurePlateMotion(world)
       ensureVisibleHydrology(world)
       recomputeSuitability(world)
-      renderer.invalidate()
+      invalidateRenderer()
       announceChange()
       setClimatePhase('idle')
       updateInspector()
@@ -1136,7 +1220,7 @@ function scheduleClimateRecompute(immediate = false) {
     } catch {
       if (!world) return
       recomputeDerived(world)
-      renderer.invalidate()
+      invalidateRenderer()
       announceChange(
         changeTitle || 'Climate rebuilt in the browser',
         'Python science failed, so the browser rebuilt rain and rivers from your heights instead.',
@@ -1171,7 +1255,7 @@ function endStroke() {
     (tool === 'land' || tool === 'sea' || tool === 'raise' || tool === 'lower' || tool === 'plateau')
   ) {
     chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21)
-    renderer.invalidate()
+    invalidateRenderer()
   }
   tutorialNotifyStrokeEnd()
   setClimatePhase('updating')
@@ -1203,7 +1287,7 @@ function doUndo() {
   syncLandRatioUi()
   syncMassUi()
   refreshGeography(world, { sculpt: false })
-  renderer.invalidate()
+  invalidateRenderer()
   updateCities()
   updateSettlementDensityHint()
   updateInspector()
@@ -1228,7 +1312,7 @@ function doRedo() {
   syncLandRatioUi()
   syncMassUi()
   refreshGeography(world, { sculpt: false })
-  renderer.invalidate()
+  invalidateRenderer()
   updateCities()
   updateSettlementDensityHint()
   updateInspector()
@@ -1375,11 +1459,12 @@ function bind() {
   syncContinentHint()
   renderLayerChips()
 
-  const globeCanvas = document.querySelector<HTMLCanvasElement>('#globe')
-  if (globeCanvas) planet = new PlanetView(globeCanvas, QUALITY_PRESETS[mapQuality])
   window.addEventListener('resize', () => {
-    if (viewMode === 'planet') planet?.layout()
-    else applyViewTransform()
+    if (viewMode === 'planet') {
+      planetLayout = { w: 0, h: 0 }
+      layoutPlanetIfNeeded()
+      requestRender()
+    } else applyViewTransform()
   })
   document.querySelector('#viewAtlas')?.addEventListener('click', () => setViewMode('atlas'))
   document.querySelector('#viewPlanet')?.addEventListener('click', () => setViewMode('planet'))
@@ -1462,7 +1547,7 @@ function bind() {
       })
     applyLandRatio(world, landRatio)
     reshapeLandmasses(world)
-    renderer.invalidate()
+    invalidateRenderer()
     updateCities()
   updateSettlementDensityHint()
     updateInspector()
@@ -1526,7 +1611,7 @@ function bind() {
             'Python refresh failed. The browser rebuilt rain and rivers from current heights.',
           )
         }
-        renderer.invalidate()
+        invalidateRenderer()
         setClimatePhase('idle')
         updateInspector()
         scheduleAutosave()
@@ -1534,7 +1619,7 @@ function bind() {
       return
     }
     refreshGeography(world, { sculpt: true })
-    renderer.invalidate()
+    invalidateRenderer()
     setClimatePhase('idle')
     announceChange(
       'You rebuilt mountains and climate',
@@ -1560,7 +1645,7 @@ function bind() {
     updateCities()
     updateSettlementDensityHint()
     updateHistoryButtons()
-    renderer.invalidate()
+    invalidateRenderer()
     scheduleAutosave()
     const roles =
       added.length <= 8
@@ -1584,7 +1669,7 @@ function bind() {
   })
   document.querySelector<HTMLInputElement>('#showTradeRoutes')?.addEventListener('change', (e) => {
     showTradeRoutes = (e.target as HTMLInputElement).checked
-    renderer.invalidate()
+    invalidateRenderer()
   })
   document.querySelector('#suggestTradeRoutes')!.addEventListener('click', () => {
     if (!world) return
@@ -1595,7 +1680,7 @@ function bind() {
     strokeActive = false
     world.tradeRoutes = suggestTradeRoutes(world)
     updateHistoryButtons()
-    renderer.invalidate()
+    invalidateRenderer()
     scheduleAutosave()
     const n = world.tradeRoutes.length
     announceChange(
@@ -1615,7 +1700,7 @@ function bind() {
     strokeActive = false
     world.tradeRoutes = []
     updateHistoryButtons()
-    renderer.invalidate()
+    invalidateRenderer()
     scheduleAutosave()
     announceChange()
   })
@@ -1625,7 +1710,7 @@ function bind() {
     mapQuality = next
     saveMapQuality(mapQuality)
     planet?.setQuality(QUALITY_PRESETS[mapQuality])
-    renderer.invalidate()
+    invalidateRenderer()
     showCoach({
       title: `Quality: ${QUALITY_PRESETS[mapQuality].label}`,
       tip: `${QUALITY_PRESETS[mapQuality].width}×${QUALITY_PRESETS[mapQuality].height} grid · sharper 3D globe textures.`,
@@ -1648,7 +1733,7 @@ function bind() {
     updateCities()
   updateSettlementDensityHint()
     updateHistoryButtons()
-    renderer.invalidate()
+    invalidateRenderer()
     scheduleAutosave()
     announceChange()
   })
@@ -1811,7 +1896,7 @@ function bind() {
       updateCities()
   updateSettlementDensityHint()
       updateHistoryButtons()
-      renderer.invalidate()
+      invalidateRenderer()
       scheduleAutosave()
       if (removed) {
         announceChange(`You razed ${removed.name}`, 'The city marker is gone. The land is the same.')
@@ -1870,7 +1955,8 @@ function bind() {
     }
 
     lastCell = cell
-    renderer.invalidate()
+    renderer.patchRegion(world, atlasDrawOpts(), cell.x, cell.y, brush)
+    requestRender()
     scheduleAutosave()
     setStatus(
       `${TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit'} — still dragging. Rain and rivers update when you release, not mid-stroke.`,
@@ -1906,8 +1992,9 @@ function bind() {
     if (painting && TERRAIN_TOOLS.includes(tool)) {
       applyAt(e.clientX, e.clientY)
     } else {
-      updateInspector()
+      scheduleInspectorUpdate()
       syncPlacementCursor()
+      requestRender()
     }
   })
   const endPointer = () => {
@@ -1925,7 +2012,7 @@ function bind() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
   const globeEl = document.querySelector<HTMLCanvasElement>('#globe')
-  if (globeEl && planet) {
+  if (globeEl) {
     let planetMoved = false
     globeEl.addEventListener('pointerdown', (e) => {
       setMapHint(false)
@@ -1940,7 +2027,7 @@ function bind() {
         return
       }
       panning = true
-      planet?.onPointerDown(e.clientX, e.clientY)
+      void ensurePlanetView().then((p) => p?.onPointerDown(e.clientX, e.clientY))
       e.preventDefault()
     })
     globeEl.addEventListener('pointermove', (e) => {
@@ -1950,11 +2037,14 @@ function bind() {
       }
       if (panning) {
         planetMoved = true
-        planet?.onPointerMove(e.clientX, e.clientY)
+        void ensurePlanetView().then((p) => {
+          if (p?.onPointerMove(e.clientX, e.clientY)) requestRender()
+        })
         return
       }
       hover = pickCell(e.clientX, e.clientY)
-      updateInspector()
+      scheduleInspectorUpdate()
+      requestRender()
     })
     globeEl.addEventListener('pointerup', (e) => {
       if (!planetMoved && !painting && e.button === 0) {
@@ -2040,7 +2130,7 @@ function placeContinentAt(x: number, y: number) {
     return
   }
   setMapHint(false)
-  renderer.invalidate()
+  invalidateRenderer()
   updateCities()
   updateSettlementDensityHint()
   updateInspector()
@@ -2104,7 +2194,7 @@ async function runDirector() {
     updateCities()
   updateSettlementDensityHint()
     updateHistoryButtons()
-    renderer.invalidate()
+    invalidateRenderer()
     scheduleAutosave()
     if (planNeedsClimateRefresh(plan)) scheduleClimateRecompute(true)
     else announceChange()
@@ -2163,17 +2253,14 @@ function tryPlaceCity(x: number, y: number) {
   updateCities()
   updateSettlementDensityHint()
   updateHistoryButtons()
-  renderer.invalidate()
+  invalidateRenderer()
   scheduleAutosave()
 }
 
 function startLoop() {
   cancelAnimationFrame(raf)
-  const tick = () => {
-    paint()
-    raf = requestAnimationFrame(tick)
-  }
-  raf = requestAnimationFrame(tick)
+  loopActive = false
+  requestRender()
 }
 
 /** Fewer pixels on huge grids so the canvas stays snappy. */
@@ -2181,13 +2268,31 @@ function rasterScale(w: World): number {
   return atlasRasterScale(w.width * w.height, mapQuality)
 }
 
-/** Draw the current world onto the canvas. Called every animation frame while dirty. */
+function atlasDrawOpts() {
+  const src = displayWorld()
+  return {
+    layer,
+    showRivers: true,
+    showCities: timelineAge < 8,
+    showTradeRoutes: showTradeRoutes && timelineAge < 8,
+    scale: src ? rasterScale(src) : 4,
+    hover,
+    brush,
+    tool,
+    painting,
+    riversMuted: climatePhase !== 'idle',
+    placeOk: hoverPlacementGate()?.ok ?? null,
+  }
+}
+
+/** Draw the current world onto the canvas when a frame is requested. */
 function paint() {
   const src = displayWorld()
   if (!src) return
   if (viewMode !== 'planet') fitAtlasCanvas()
-  if (viewMode === 'planet' && planet) {
-    planet.layout()
+  if (viewMode === 'planet') {
+    if (!planet) return
+    layoutPlanetIfNeeded()
     planet.sync(
       src,
       globeLook,
@@ -2200,19 +2305,7 @@ function paint() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
   const ctx = canvas.getContext('2d')!
-  renderer.draw(ctx, src, {
-    layer,
-    showRivers: true,
-    showCities: timelineAge < 8,
-    showTradeRoutes: showTradeRoutes && timelineAge < 8,
-    scale: rasterScale(src),
-    hover,
-    brush,
-    tool,
-    painting,
-    riversMuted: climatePhase !== 'idle',
-    placeOk: hoverPlacementGate()?.ok ?? null,
-  })
+  renderer.draw(ctx, src, atlasDrawOpts())
 }
 
 function updateInspector() {
