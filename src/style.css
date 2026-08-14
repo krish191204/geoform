@@ -807,7 +807,38 @@ button.primary:hover {
   font-size: 0.86rem;
 }
 
-.city-list {
+.director {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+}
+
+.director-label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+}
+
+.director textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  padding: 0.5rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(28, 34, 28, 0.16);
+  background: rgba(255, 255, 255, 0.65);
+  font: inherit;
+  line-height: 1.35;
+}
+
+.director textarea:focus {
+  outline: 2px solid rgba(54, 120, 72, 0.35);
+  border-color: rgba(54, 120, 72, 0.45);
+}
+
+#directorRun {
+  justify-self: start;
+}
   margin: 0.5rem 0 0;
   padding: 0;
   list-style: none;

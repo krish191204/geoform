@@ -110,6 +110,8 @@ import {
 } from './world/mass'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
 import { formatTemperature } from './world/temperature'
+import { executeDirectorPlan, planNeedsClimateRefresh } from './world/director'
+import { interpretDirector } from './world/directorClient'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { PlanetView } from './render/globe'
@@ -788,6 +790,16 @@ function renderShell() {
         <div id="geoFlags" class="geo-flags"></div>
         <div id="inspect"></div>
         <div class="status" id="status">${status}</div>
+        <h3>Director</h3>
+        <div class="director">
+          <label class="director-label">
+            Tell the map what to change
+            <textarea id="directorPrompt" rows="3" spellcheck="true" placeholder="Make the east coast wetter and add a mining town in the highlands"></textarea>
+          </label>
+          <button type="button" id="directorRun">Apply</button>
+          <p class="hint" id="directorStatus">Plain English → raise, rivers, settlements. Works offline; set GEMINI_API_KEY on the API for smarter parsing.</p>
+        </div>
+
         <h3>Cities</h3>
         <ul class="city-list" id="cities"></ul>
       </aside>
@@ -1463,6 +1475,9 @@ function bind() {
       tone: 'tip',
     })
   })
+  document.querySelector('#directorRun')!.addEventListener('click', () => {
+    void runDirector()
+  })
   document.querySelector('#clearCities')!.addEventListener('click', () => {
     if (!world?.cities.length) return
     beginStroke('Clear cities', {
@@ -1888,6 +1903,61 @@ function placeContinentAuto() {
   placeContinentAt(site.x, site.y)
   hover = site
   updateInspector()
+}
+
+async function runDirector() {
+  if (!world || busy) return
+  if (isTutorialBlocking()) {
+    setStatus('Finish the tutorial before using Director.')
+    return
+  }
+  if (timelineAge > 0.5) setTimelineAge(0)
+  const input = document.querySelector<HTMLTextAreaElement>('#directorPrompt')
+  const statusEl = document.querySelector('#directorStatus')
+  const prompt = input?.value.trim() ?? ''
+  if (!prompt) {
+    if (statusEl) statusEl.textContent = 'Type a request first — e.g. “Add a mining town” or “Make the east coast wetter”.'
+    return
+  }
+  setBusy(true)
+  if (statusEl) statusEl.textContent = 'Director is planning…'
+  try {
+    const plan = await interpretDirector(prompt, world)
+    if (!plan.actions.length) {
+      if (statusEl) statusEl.textContent = plan.explanation
+      showCoach({
+        title: 'Director could not parse that',
+        tip: plan.explanation,
+        next: 'Try: “Add a mining town”, “Suggest settlements”, or “Make the east coast wetter”.',
+        tone: 'warn',
+      })
+      return
+    }
+    beginStroke('Director', {
+      title: 'Director applied your request',
+      why: plan.explanation,
+    })
+    strokeActive = false
+    const result = executeDirectorPlan(world, plan)
+    updateCities()
+    updateHistoryButtons()
+    renderer.invalidate()
+    scheduleAutosave()
+    if (planNeedsClimateRefresh(plan)) scheduleClimateRecompute(true)
+    else announceChange()
+    const via = plan.source === 'gemini' ? 'Gemini' : plan.source === 'rules' ? 'rules' : 'local rules'
+    if (statusEl) statusEl.textContent = `${plan.explanation} (${via})`
+    showCoach({
+      title: 'Director applied your request',
+      tip: result.summary.join(' · '),
+      next: planNeedsClimateRefresh(plan)
+        ? 'Climate is rebuilding from the new heights.'
+        : 'Rename settlements in the city list.',
+      tone: 'go',
+    })
+  } finally {
+    setBusy(false)
+  }
 }
 
 function tryPlaceCity(x: number, y: number) {

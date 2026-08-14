@@ -18,13 +18,17 @@ from urllib.parse import urlparse
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+SERVER = Path(__file__).resolve().parent
 VENDOR = ROOT / "vendor" / "worldengine"
 sys.path.insert(0, str(VENDOR))
+sys.path.insert(0, str(SERVER))
 
 from worldengine.generation import generate_world, initialize_ocean_and_thresholds  # noqa: E402
 from worldengine.model.world import GenerationParameters, Size, World  # noqa: E402
 from worldengine.plates import world_gen  # noqa: E402
 from worldengine.step import Step  # noqa: E402
+
+from director_interpret import interpret_director  # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = 8765
@@ -252,6 +256,11 @@ class Handler(BaseHTTPRequestHandler):
                     raw_elev_max=float(data.get("rawElevMax", 8.0)),
                 )
                 self._json(200, result)
+                return
+            if path == "/api/interpret":
+                prompt = str(data.get("prompt", "")).strip()
+                context = data.get("context") if isinstance(data.get("context"), dict) else {}
+                self._json(200, interpret_director(prompt, context))
                 return
             self._json(404, {"error": "not found"})
         except Exception as exc:  # noqa: BLE001
