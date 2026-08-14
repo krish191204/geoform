@@ -1,20 +1,23 @@
 /**
  * 3D globe view. Same World arrays, wrapped onto a sphere with Three.js.
- * Color, normal, bump, and displacement textures are baked from draw.ts.
+ * Color, normal, bump, displacement, and roughness textures are baked from draw.ts.
  */
 import * as THREE from 'three'
 import {
   bakeBumpImageData,
   bakeDisplacementImageData,
   bakeNormalImageData,
-  bakeWorldImageData,
+  bakeRoughnessImageData,
+  bakeWorldImageDataSmooth,
   type MapLook,
 } from './draw'
-import type { QualityPreset } from '../world/quality'
-import { QUALITY_PRESETS } from '../world/quality'
+import { globeBakeForWorld, QUALITY_PRESETS, type QualityPreset } from '../world/quality'
 import type { World } from '../world/types'
 
-function imageDataToTexture(image: ImageData): THREE.CanvasTexture {
+function imageDataToTexture(
+  image: ImageData,
+  renderer: THREE.WebGLRenderer,
+): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = image.width
   canvas.height = image.height
@@ -22,7 +25,11 @@ function imageDataToTexture(image: ImageData): THREE.CanvasTexture {
   ctx.putImageData(image, 0, 0)
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
-  tex.anisotropy = 8
+  const maxAniso = renderer.capabilities.getMaxAnisotropy()
+  tex.anisotropy = Math.min(16, maxAniso)
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.magFilter = THREE.LinearFilter
+  tex.generateMipmaps = true
   tex.needsUpdate = true
   return tex
 }
@@ -35,10 +42,12 @@ export class PlanetView {
   private globe: THREE.Mesh
   private atmosphere: THREE.Mesh
   private sun: THREE.DirectionalLight
+  private fill: THREE.DirectionalLight
   private colorTex: THREE.CanvasTexture | null = null
   private bumpTex: THREE.CanvasTexture | null = null
   private normalTex: THREE.CanvasTexture | null = null
   private dispTex: THREE.CanvasTexture | null = null
+  private roughTex: THREE.CanvasTexture | null = null
   private qualityKey = ''
   private yaw = 0.85
   private pitch = 0.22
@@ -48,7 +57,7 @@ export class PlanetView {
   private lastY = 0
   private cacheKey = ''
 
-  constructor(canvas: HTMLCanvasElement, preset = QUALITY_PRESETS.standard) {
+  constructor(canvas: HTMLCanvasElement, preset = QUALITY_PRESETS.hd) {
     this.canvas = canvas
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -56,7 +65,10 @@ export class PlanetView {
       alpha: true,
     })
     this.renderer.setClearColor(0x000000, 0)
-    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
+    this.renderer.setPixelRatio(Math.min(2.5, window.devicePixelRatio || 1))
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.05
 
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
@@ -65,28 +77,31 @@ export class PlanetView {
       this.makeGlobeGeometry(preset),
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
-        roughness: 0.72,
-        metalness: 0.04,
+        roughness: 0.82,
+        metalness: 0.03,
       }),
     )
     this.scene.add(this.globe)
 
     this.atmosphere = new THREE.Mesh(
-      new THREE.SphereGeometry(1.045, 64, 48),
+      new THREE.SphereGeometry(1.045, 72, 54),
       new THREE.MeshBasicMaterial({
-        color: 0x7ec8e8,
+        color: 0x8ec8e8,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.16,
         side: THREE.BackSide,
         depthWrite: false,
       }),
     )
     this.scene.add(this.atmosphere)
 
-    const ambient = new THREE.AmbientLight(0x8aa4c0, 0.55)
+    const ambient = new THREE.AmbientLight(0x9ab0c8, 0.48)
     this.scene.add(ambient)
-    this.sun = new THREE.DirectionalLight(0xfff4e0, 1.35)
+    this.sun = new THREE.DirectionalLight(0xfff6e8, 1.45)
     this.scene.add(this.sun)
+    this.fill = new THREE.DirectionalLight(0x88a8d0, 0.35)
+    this.fill.position.set(-2.2, 0.4, -1.6)
+    this.scene.add(this.fill)
 
     const stars = this.makeStars()
     this.scene.add(stars)
@@ -110,7 +125,7 @@ export class PlanetView {
   }
 
   private makeStars(): THREE.Points {
-    const n = 500
+    const n = 600
     const pos = new Float32Array(n * 3)
     for (let i = 0; i < n; i++) {
       const u = Math.random() * 2 - 1
@@ -142,36 +157,49 @@ export class PlanetView {
     this.cacheKey = `stale:${look}`
   }
 
-  sync(world: World, look: MapLook, dirtyKey: string, preset = QUALITY_PRESETS.standard): void {
+  sync(world: World, look: MapLook, dirtyKey: string, preset = QUALITY_PRESETS.hd): void {
     this.setQuality(preset)
-    const bake = preset.globeBake
-    const key = `${dirtyKey}|${look}|${world.width}x${world.height}|${preset.id}|${bake}`
+    const bake = globeBakeForWorld(world.width, preset)
+    const texW = world.width * bake
+    const texH = world.height * bake
+    const key = `${dirtyKey}|${look}|${world.width}x${world.height}|${preset.id}|${bake}|${texW}x${texH}`
     if (key === this.cacheKey && this.colorTex) return
     this.cacheKey = key
     this.colorTex?.dispose()
     this.bumpTex?.dispose()
     this.normalTex?.dispose()
     this.dispTex?.dispose()
-    this.colorTex = imageDataToTexture(bakeWorldImageData(world, look, bake))
-    this.bumpTex = imageDataToTexture(bakeBumpImageData(world, bake))
-    this.normalTex = imageDataToTexture(bakeNormalImageData(world, bake))
-    this.dispTex = imageDataToTexture(bakeDisplacementImageData(world, bake))
+    this.roughTex?.dispose()
+
+    this.colorTex = imageDataToTexture(
+      bakeWorldImageDataSmooth(world, look, texW, texH),
+      this.renderer,
+    )
+    this.bumpTex = imageDataToTexture(bakeBumpImageData(world, bake), this.renderer)
+    this.normalTex = imageDataToTexture(bakeNormalImageData(world, bake), this.renderer)
+    this.dispTex = imageDataToTexture(bakeDisplacementImageData(world, bake), this.renderer)
+    this.roughTex = imageDataToTexture(bakeRoughnessImageData(world, bake), this.renderer)
+
     const night = look === 'night'
     const mat = this.globe.material as THREE.MeshStandardMaterial
     mat.map = this.colorTex
-    mat.bumpMap = this.bumpTex
-    mat.bumpScale = night ? 0.025 : 0.05
-    mat.normalMap = this.normalTex
-    mat.normalScale = new THREE.Vector2(1.15, 1.15)
-    mat.displacementMap = this.dispTex
-    mat.displacementScale = night ? preset.displacementScale * 0.5 : preset.displacementScale
-    mat.emissive = new THREE.Color(night ? 0x22180c : 0x000000)
+    mat.bumpMap = night ? null : this.bumpTex
+    mat.bumpScale = night ? 0.02 : 0.055
+    mat.normalMap = night ? null : this.normalTex
+    mat.normalScale = new THREE.Vector2(1.2, 1.2)
+    mat.displacementMap = night ? null : this.dispTex
+    mat.displacementScale = night ? preset.displacementScale * 0.45 : preset.displacementScale
+    mat.roughnessMap = night ? null : this.roughTex
+    mat.roughness = night ? 0.95 : 1
+    mat.metalness = night ? 0 : 0.04
+    mat.emissive = new THREE.Color(night ? 0x1a1408 : 0x000000)
     mat.emissiveMap = night ? this.colorTex : null
-    mat.emissiveIntensity = night ? 0.85 : 0
+    mat.emissiveIntensity = night ? 1.25 : 0
     mat.needsUpdate = true
     this.atmosphere.visible = true
-    ;(this.atmosphere.material as THREE.MeshBasicMaterial).opacity = night ? 0.1 : 0.18
-    this.sun.intensity = night ? 0.35 : 1.35
+    ;(this.atmosphere.material as THREE.MeshBasicMaterial).opacity = night ? 0.08 : 0.16
+    this.sun.intensity = night ? 0.28 : 1.45
+    this.fill.intensity = night ? 0.12 : 0.35
   }
 
   orbit(dx: number, dy: number): void {
@@ -247,6 +275,7 @@ export class PlanetView {
     this.bumpTex?.dispose()
     this.normalTex?.dispose()
     this.dispTex?.dispose()
+    this.roughTex?.dispose()
     this.renderer.dispose()
   }
 }

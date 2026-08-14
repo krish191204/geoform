@@ -93,9 +93,11 @@ import {
 } from './world/settlements'
 import {
   atlasRasterScale,
+  displayPixelRatio,
   loadMapQuality,
   QUALITY_PRESETS,
   saveMapQuality,
+  type ExportResolution,
   type MapQuality,
 } from './world/quality'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
@@ -121,6 +123,7 @@ import {
 } from './world/tradeRoutes'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
+import { downloadMapPng } from './render/exportMap'
 import type { PlanetView } from './render/globe'
 import type { Layer, Tool, World } from './world/types'
 
@@ -596,7 +599,7 @@ function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number }
 
 /**
  * Zoom-out: add real cells around the map so it still fills the view.
- * If we are already at 640×320 we just zoom the camera instead.
+ * If we are already at 1024×512 we just zoom the camera instead.
  */
 function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   if (!world || busy || strokeActive || factor >= 1) return false
@@ -774,6 +777,8 @@ function renderShell() {
             <button type="button" id="randomize" title="Fill a random seed">Shuffle</button>
           </div>
           <button type="button" id="export">Export JSON</button>
+          <button type="button" id="exportPng2k">Export map · 2K PNG</button>
+          <button type="button" id="exportPng4k">Export map · 4K PNG</button>
           <button type="button" id="import">Import JSON</button>
           <input id="importFile" type="file" accept="application/json,.json" hidden />
           <button type="button" id="replayTutorial">Replay tutorial</button>
@@ -846,7 +851,7 @@ function renderShell() {
               .join('')}
           </select>
         </label>
-        <p class="hint">Higher detail = sharper atlas and 3D globe on the next New world. Existing saves keep their size.</p>
+        <p class="hint">Higher detail = sharper atlas and 3D globe on the next New world. HD (768×384) is default on desktop. Existing saves keep their size.</p>
 
         <h3>Settlements</h3>
         <label class="settlement-suggest-row">
@@ -1765,6 +1770,30 @@ function bind() {
       tone: 'ok',
     })
   })
+  const exportMapLook = (): MapLook =>
+    viewMode === 'planet' ? globeLook : isLayerLook(layer) ? layer : 'relief'
+  const runMapExport = (resolution: ExportResolution) => {
+    const src = displayWorld()
+    if (!src || busy) return
+    const look = exportMapLook()
+    setBusy(true, resolution === '4k' ? 'Rendering 4K map…' : 'Rendering 2K map…')
+    void downloadMapPng(src, look, resolution)
+      .then(() => {
+        setStatus(`Exported ${resolution.toUpperCase()} PNG (${look})`)
+        showCoach({
+          title: `${resolution.toUpperCase()} map saved`,
+          tip: 'High-resolution bilinear export — sharper coasts and labels than the live atlas.',
+          next: 'Share it, or switch to Planet view to see the same world in 3D.',
+          tone: 'ok',
+        })
+      })
+      .catch((err) => {
+        setStatus(`Export failed: ${err instanceof Error ? err.message : String(err)}`)
+      })
+      .finally(() => setBusy(false))
+  }
+  document.querySelector('#exportPng2k')?.addEventListener('click', () => runMapExport('2k'))
+  document.querySelector('#exportPng4k')?.addEventListener('click', () => runMapExport('4k'))
   const importFile = document.querySelector<HTMLInputElement>('#importFile')!
   document.querySelector('#import')!.addEventListener('click', () => {
     if (isTutorialBlocking()) {
@@ -2265,7 +2294,8 @@ function startLoop() {
 
 /** Fewer pixels on huge grids so the canvas stays snappy. */
 function rasterScale(w: World): number {
-  return atlasRasterScale(w.width * w.height, mapQuality)
+  const base = atlasRasterScale(w.width * w.height, mapQuality)
+  return Math.min(8, Math.round(base * displayPixelRatio()))
 }
 
 function atlasDrawOpts() {

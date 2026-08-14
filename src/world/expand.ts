@@ -3,7 +3,7 @@
  * Now it adds real cells around the map so the world grows.
  *
  * padsForZoomOut: how many cells to add on each side so the map still fills
- *   the view, without going past 640×320.
+ *   the view, without going past 1024×512.
  * expandWorld: copy the old grid into the middle, invent new height around
  *   the edges that matches the landmass style, scoot cities, chew the new coasts.
  *
@@ -16,8 +16,8 @@ import { clampContinentMass } from './mass'
 import { fbm } from './noise'
 import type { World } from './types'
 
-export const MAX_WORLD_WIDTH = 640
-export const MAX_WORLD_HEIGHT = 320
+export const MAX_WORLD_WIDTH = 1024
+export const MAX_WORLD_HEIGHT = 512
 
 const idx = (w: number, x: number, y: number) => y * w + x
 
