@@ -93,6 +93,7 @@ import {
   type ContinentMass,
 } from './world/mass'
 import { MAX_AGE_MA, reconstructPast } from './world/timeline'
+import { formatTemperature } from './world/temperature'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { PlanetView } from './render/globe'
@@ -323,7 +324,7 @@ function renderLayerChips() {
           { id: 'night', label: 'Night' },
           { id: 'biome', label: 'Biome' },
           { id: 'moisture', label: 'Moisture' },
-          { id: 'temperature', label: 'Heat' },
+          { id: 'temperature', label: 'Temperature' },
           { id: 'plates', label: 'Plates' },
           { id: 'elevation', label: 'Height' },
         ]
@@ -331,7 +332,7 @@ function renderLayerChips() {
           { id: 'relief', label: 'Relief' },
           { id: 'biome', label: 'Biome' },
           { id: 'moisture', label: 'Moisture' },
-          { id: 'temperature', label: 'Heat' },
+          { id: 'temperature', label: 'Temperature' },
           { id: 'suitability', label: 'Settle' },
           { id: 'plates', label: 'Plates' },
           { id: 'elevation', label: 'Height' },
@@ -1950,7 +1951,7 @@ function updateInspector() {
     <dl>
       <dt>Elevation</dt><dd>${(src.elev[i] * 100) | 0}%</dd>
       <dt>Land / water</dt><dd>${landPct}% · ${100 - landPct}%</dd>
-      <dt>Temperature</dt><dd>${(src.temp[i] * 100) | 0}%</dd>
+      <dt>Temperature</dt><dd>${formatTemperature(src.temp[i])}</dd>
       <dt>Moisture</dt><dd>${(src.moist[i] * 100) | 0}%</dd>
       <dt>River flux</dt><dd>${src.flux[i].toFixed(1)}</dd>
       <dt>Biome</dt><dd>${src.biome[i]}</dd>

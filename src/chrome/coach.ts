@@ -114,7 +114,7 @@ const LAYER_COACH: Record<string, CoachMessage> = {
   },
   temperature: {
     title: 'Temperature look',
-    tip: 'Hot near the equator band, cold at poles and high peaks.',
+    tip: 'Hot near the equator, cold at poles and peaks. Hover land for °C and °F.',
     next: 'Raise mountains to cool them.',
     tone: 'tip',
   },

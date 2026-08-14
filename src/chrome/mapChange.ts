@@ -4,6 +4,7 @@
  */
 import { RIVER_MAIN_MIN, RIVER_VISIBLE_MIN } from '../world/climate'
 import { landFraction } from '../world/land'
+import { formatTemperatureDelta } from '../world/temperature'
 import type { Tool, World } from '../world/types'
 import type { CoachMessage } from './coach'
 
@@ -150,10 +151,11 @@ export function diffWorld(before: WorldSnapshot, after: WorldSnapshot): string[]
 
   const tempDelta = after.landTemp - before.landTemp
   if (Math.abs(tempDelta) >= 0.02) {
+    const deg = formatTemperatureDelta(tempDelta)
     out.push(
       tempDelta > 0
-        ? `Land got a bit warmer (lower mountains or more lowland).`
-        : `Land got a bit cooler (higher mountains or more polar land).`,
+        ? `Land got warmer by ~${deg} on average (lower mountains or more lowland).`
+        : `Land got cooler by ~${deg} on average (higher mountains or more polar land).`,
     )
   }
 
