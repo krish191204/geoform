@@ -283,6 +283,7 @@ export function generateWorld(
     biome: new Array(width * height) as Biome[],
     suitability: new Float32Array(width * height),
     cities: [] as City[],
+    tradeRoutes: [],
     plateCount,
     plateVx,
     plateVy,

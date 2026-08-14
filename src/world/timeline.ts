@@ -34,6 +34,7 @@ function cloneShell(world: World): World {
     biome: new Array(n),
     suitability: new Float32Array(n),
     cities: [],
+    tradeRoutes: [],
     plateVx: new Float32Array(world.plateVx),
     plateVy: new Float32Array(world.plateVy),
   }

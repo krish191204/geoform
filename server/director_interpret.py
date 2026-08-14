@@ -185,6 +185,15 @@ def _urlopen(req: urllib.request.Request, timeout: int = 45):
         raise
 
 
+def _gemini_request(api_key: str, model: str, body: bytes) -> urllib.request.Request:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    return urllib.request.Request(url, data=body, headers=headers, method="POST")
+
+
 def interpret_gemini(prompt: str, context: dict[str, Any], api_key: str) -> dict[str, Any] | None:
     user = f"World context:\n{json.dumps(context, indent=2)}\n\nUser request:\n{prompt}"
     body = json.dumps(
@@ -195,22 +204,12 @@ def interpret_gemini(prompt: str, context: dict[str, Any], api_key: str) -> dict
     ).encode("utf-8")
 
     models = (
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
+        "gemini-3.6-flash",
+        "gemini-3-flash-preview",
     )
     last_err = ""
     for model in models:
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model}:generateContent?key={api_key}"
-        )
-        req = urllib.request.Request(
-            url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        req = _gemini_request(api_key, model, body)
         try:
             with _urlopen(req, timeout=45) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))

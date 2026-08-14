@@ -878,7 +878,8 @@ button.primary:hover {
 }
 
 .quality-row,
-.settlement-suggest-row {
+.settlement-suggest-row,
+.trade-route-toggle {
   display: grid;
   gap: 0.35rem;
   margin-bottom: 0.65rem;

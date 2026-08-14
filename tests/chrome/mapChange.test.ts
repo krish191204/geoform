@@ -20,6 +20,7 @@ function blank(width = 20, height = 10): World {
     biome: Array.from({ length: n }, () => 'ocean'),
     suitability: new Float32Array(n),
     cities: [],
+    tradeRoutes: [],
     plateCount: 1,
     plateVx: new Float32Array([0]),
     plateVy: new Float32Array([0]),

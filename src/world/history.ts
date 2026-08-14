@@ -9,7 +9,7 @@
  *
  * MAX = 40 strokes. Older ones fall off the front.
  */
-import type { City, World } from './types'
+import type { City, TradeRoute, World } from './types'
 import { cloneCities, cloneElev, clonePlateId, ensureDerived } from './tools'
 
 export interface HistoryEntry {
@@ -19,6 +19,7 @@ export interface HistoryEntry {
   plateVx: Float32Array
   plateVy: Float32Array
   cities: City[]
+  tradeRoutes: TradeRoute[]
   width: number
   height: number
   originX: number
@@ -42,6 +43,10 @@ function snapshot(world: World, label: string): HistoryEntry {
     plateVx: new Float32Array(world.plateVx),
     plateVy: new Float32Array(world.plateVy),
     cities: cloneCities(world.cities),
+    tradeRoutes: (world.tradeRoutes ?? []).map((r) => ({
+      ...r,
+      waypoints: r.waypoints.map((p) => ({ ...p })),
+    })),
     width: world.width,
     height: world.height,
     originX: world.originX,
@@ -72,6 +77,10 @@ function restore(world: World, entry: HistoryEntry): void {
   world.plateVx = new Float32Array(entry.plateVx)
   world.plateVy = new Float32Array(entry.plateVy)
   world.cities = cloneCities(entry.cities)
+  world.tradeRoutes = (entry.tradeRoutes ?? []).map((r) => ({
+    ...r,
+    waypoints: r.waypoints.map((p) => ({ ...p })),
+  }))
   ensureDerived(world)
 }
 

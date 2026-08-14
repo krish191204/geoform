@@ -6,8 +6,9 @@
  * on top. The CSS object-fit: contain letterbox around the canvas is UI
  * chrome — not ocean. Ocean is only cells whose height is below sea level.
  */
-import { biomeColor, type Layer, type World } from '../world/types'
+import { biomeColor, type Layer, type SeaNavClass, type TradeRoute, type World } from '../world/types'
 import { RIVER_MAIN_MIN, RIVER_VISIBLE_MIN } from '../world/climate'
+import { classifySeaCell } from '../world/tradeRoutes'
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
@@ -389,6 +390,8 @@ export interface DrawOptions {
   layer: Layer
   showRivers: boolean
   showCities: boolean
+  /** Maritime lanes and sea hazard overlay. */
+  showTradeRoutes?: boolean
   scale?: number
   time?: number
   hover?: { x: number; y: number } | null
@@ -402,6 +405,70 @@ export interface DrawOptions {
    * null = normal brush colors.
    */
   placeOk?: boolean | null
+}
+
+const HAZARD_TINT: Record<SeaNavClass, [number, number, number, number]> = {
+  blocked: [120, 28, 28, 0.42],
+  coastal: [180, 110, 40, 0.28],
+  polar: [140, 170, 210, 0.32],
+  open: [0, 0, 0, 0],
+}
+
+const ROUTE_STROKE: Record<TradeRoute['hazard'], string> = {
+  open: 'rgba(255, 220, 150, 0.88)',
+  coastal: 'rgba(255, 190, 110, 0.9)',
+  polar: 'rgba(190, 215, 255, 0.88)',
+  mixed: 'rgba(255, 200, 130, 0.9)',
+}
+
+function strokeRoute(
+  ctx: CanvasRenderingContext2D,
+  pts: { x: number; y: number }[],
+  scale: number,
+  hazard: TradeRoute['hazard'],
+) {
+  if (pts.length < 2) return
+  ctx.save()
+  ctx.strokeStyle = ROUTE_STROKE[hazard]
+  ctx.lineWidth = 2.2
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.setLineDash(hazard === 'open' ? [7, 5] : [4, 4])
+  ctx.beginPath()
+  ctx.moveTo((pts[0].x + 0.5) * scale, (pts[0].y + 0.5) * scale)
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]
+    const b = pts[i]
+    const dx = b.x - a.x
+    if (Math.abs(dx) > 1) {
+      ctx.lineTo((b.x + 0.5) * scale, (b.y + 0.5) * scale)
+    } else {
+      ctx.lineTo((b.x + 0.5) * scale, (b.y + 0.5) * scale)
+    }
+  }
+  ctx.stroke()
+  ctx.setLineDash([])
+  ctx.restore()
+}
+
+function drawSeaHazards(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  scale: number,
+) {
+  const { width: w, height: h, seaLevel, elev } = world
+  ctx.save()
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (elev[y * w + x] >= seaLevel) continue
+      const cls = classifySeaCell(world, x, y)
+      const tint = HAZARD_TINT[cls]
+      if (tint[3] <= 0) continue
+      ctx.fillStyle = `rgba(${tint[0]}, ${tint[1]}, ${tint[2]}, ${tint[3]})`
+      ctx.fillRect(x * scale, y * scale, scale, scale)
+    }
+  }
+  ctx.restore()
 }
 
 interface WindParticle {
@@ -658,6 +725,14 @@ export class MapRenderer {
         ctx.stroke()
       }
       ctx.restore()
+    }
+
+    // Maritime trade routes + sea hazard overlay
+    if (opts.showTradeRoutes) {
+      drawSeaHazards(ctx, world, scale)
+      for (const route of world.tradeRoutes) {
+        strokeRoute(ctx, route.waypoints, scale, route.hazard)
+      }
     }
 
     // Cities with soft pulse

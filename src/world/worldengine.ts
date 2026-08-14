@@ -44,6 +44,7 @@ export function worldFromPayload(
     cities: keepCities.filter(
       (c) => c.x >= 0 && c.y >= 0 && c.x < payload.width && c.y < payload.height,
     ),
+    tradeRoutes: [],
     plateCount: payload.plateCount,
     plateVx: frame?.plateVx ? new Float32Array(frame.plateVx) : new Float32Array(0),
     plateVy: frame?.plateVy ? new Float32Array(frame.plateVy) : new Float32Array(0),

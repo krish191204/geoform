@@ -112,6 +112,11 @@ import { MAX_AGE_MA, reconstructPast } from './world/timeline'
 import { formatTemperature } from './world/temperature'
 import { executeDirectorPlan, planNeedsClimateRefresh } from './world/director'
 import { interpretDirector } from './world/directorClient'
+import {
+  classifySeaCell,
+  SEA_NAV_LABEL,
+  suggestTradeRoutes,
+} from './world/tradeRoutes'
 import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { PlanetView } from './render/globe'
@@ -177,6 +182,7 @@ let pendingNewWorld: (() => void) | null = null
 let timelineAge = 0
 let timelineView: World | null = null
 let timelineTimer: number | null = null
+let showTradeRoutes = true
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -745,6 +751,17 @@ function renderShell() {
           <button type="button" id="clearCities">Clear all</button>
         </div>
         <p class="hint">Picks seats of power, farmlands, ports, mines, and more from geography. Each town gets a role in the city list.</p>
+
+        <h3>Trade routes</h3>
+        <label class="trade-route-toggle">
+          <input type="checkbox" id="showTradeRoutes" ${showTradeRoutes ? 'checked' : ''} />
+          Show sea lanes &amp; hazards
+        </label>
+        <div class="action-row">
+          <button type="button" id="suggestTradeRoutes">Suggest trade routes</button>
+          <button type="button" id="clearTradeRoutes">Clear routes</button>
+        </div>
+        <p class="hint">Gold dashed lines are shipping lanes between ports. Red/amber/blue tints mark shallow coasts, polar ice, and blocked waters ships avoid.</p>
 
         <h3>Actions</h3>
         <div class="action-row">
@@ -1461,6 +1478,43 @@ function bind() {
         : 'Try another role, or switch to Settle look and improve the land first.',
     )
   })
+  document.querySelector<HTMLInputElement>('#showTradeRoutes')?.addEventListener('change', (e) => {
+    showTradeRoutes = (e.target as HTMLInputElement).checked
+    renderer.invalidate()
+  })
+  document.querySelector('#suggestTradeRoutes')!.addEventListener('click', () => {
+    if (!world) return
+    beginStroke('Suggest trade routes', {
+      title: 'You asked for trade routes',
+      why: 'The app links fishing ports, trade towns, and capitals with ocean paths that avoid shallow shelves, ice, and land.',
+    })
+    strokeActive = false
+    world.tradeRoutes = suggestTradeRoutes(world)
+    updateHistoryButtons()
+    renderer.invalidate()
+    scheduleAutosave()
+    const n = world.tradeRoutes.length
+    announceChange(
+      n ? `You added ${n} trade route${n === 1 ? '' : 's'}` : 'No trade routes were added',
+      n
+        ? 'Turn on sea lanes on the map to see dashed shipping paths and hazard tints on dangerous waters.'
+        : 'Need at least two coastal ports (fishing, trade, or capital). Try Suggest settlements first.',
+      n ? 'Routes reroute around shallow coasts and polar ice when possible.' : undefined,
+    )
+  })
+  document.querySelector('#clearTradeRoutes')!.addEventListener('click', () => {
+    if (!world?.tradeRoutes.length) return
+    beginStroke('Clear trade routes', {
+      title: 'You cleared trade routes',
+      why: 'Only the sea lanes are gone. Settlements and geography are unchanged.',
+    })
+    strokeActive = false
+    world.tradeRoutes = []
+    updateHistoryButtons()
+    renderer.invalidate()
+    scheduleAutosave()
+    announceChange()
+  })
   document.querySelector<HTMLSelectElement>('#mapQuality')?.addEventListener('change', (e) => {
     const next = (e.target as HTMLSelectElement).value as MapQuality
     if (!(next in QUALITY_PRESETS)) return
@@ -1486,6 +1540,7 @@ function bind() {
     })
     strokeActive = false
     world.cities = []
+    world.tradeRoutes = []
     updateCities()
     updateHistoryButtons()
     renderer.invalidate()
@@ -2040,6 +2095,7 @@ function paint() {
     layer,
     showRivers: true,
     showCities: timelineAge < 8,
+    showTradeRoutes: showTradeRoutes && timelineAge < 8,
     scale: rasterScale(src),
     hover,
     brush,
@@ -2066,6 +2122,14 @@ function updateInspector() {
   const above = src.elev[i] >= src.seaLevel
   const landPct = Math.round(landFraction(src.elev, src.seaLevel) * 100)
   const gate = hoverPlacementGate()
+  const seaNav =
+    !above && showTradeRoutes
+      ? `<dt>Sea lane</dt><dd>${SEA_NAV_LABEL[classifySeaCell(src, x, y)]}</dd>`
+      : ''
+  const routeCount =
+    showTradeRoutes && src.tradeRoutes.length
+      ? `<dt>Trade routes</dt><dd>${src.tradeRoutes.length} active lane${src.tradeRoutes.length === 1 ? '' : 's'}</dd>`
+      : ''
   const placeBanner =
     gate && (tool === 'city' || tool === 'continent' || tool === 'razecity')
       ? `<div class="place-banner ${gate.ok ? (gate.tier === 'marginal' ? 'soft' : 'ok') : 'hard'}">
@@ -2089,6 +2153,8 @@ function updateInspector() {
       <dt>River flux</dt><dd>${src.flux[i].toFixed(1)}</dd>
       <dt>Biome</dt><dd>${src.biome[i]}</dd>
       <dt>Plate</dt><dd>#${src.plateId[i]}</dd>
+      ${seaNav}
+      ${routeCount}
     </dl>
     <ul class="reasons">
       ${
@@ -2099,7 +2165,9 @@ function updateInspector() {
                   `<li class="${suit.tier === 'favorable' ? 'good' : suit.tier === 'marginal' ? 'warn' : 'bad'}">${r}</li>`,
               )
               .join('')
-          : '<li>Open water</li>'
+          : showTradeRoutes
+            ? `<li>${SEA_NAV_LABEL[classifySeaCell(src, x, y)]}</li>`
+            : '<li>Open water</li>'
       }
     </ul>
   `

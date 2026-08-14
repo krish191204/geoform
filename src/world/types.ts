@@ -60,6 +60,21 @@ export interface City {
   role?: SettlementRole
 }
 
+/** How safe a sea cell is for shipping. */
+export type SeaNavClass = 'open' | 'coastal' | 'polar' | 'blocked'
+
+/** A maritime lane between two port settlements. */
+export interface TradeRoute {
+  id: string
+  /** Index into world.cities */
+  from: number
+  to: number
+  /** Ocean waypoints (grid coords), including start/end port cells. */
+  waypoints: { x: number; y: number }[]
+  /** Worst hazard class along the route. */
+  hazard: 'open' | 'coastal' | 'polar' | 'mixed'
+}
+
 /** Settlement viability — not one ideal biome, but can vs cannot. */
 export type SuitabilityTier = 'blocked' | 'marginal' | 'favorable'
 
@@ -112,6 +127,8 @@ export interface World {
   /** How good this cell is for a city. Same 0..1 idea as City.score. */
   suitability: Float32Array
   cities: City[]
+  /** Maritime trade lanes between coastal settlements. */
+  tradeRoutes: TradeRoute[]
   plateCount: number
   /** How fast each plate slides, in cells per million years. */
   plateVx: Float32Array

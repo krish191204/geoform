@@ -23,6 +23,7 @@ function miniWorld(width = 16, height = 8): World {
     biome: Array.from({ length: n }, () => 'ocean'),
     suitability: new Float32Array(n),
     cities: [{ x: 8, y: 4, name: 'Peak', score: 0.8 }],
+    tradeRoutes: [],
     plateCount: 1,
     rawElevMin: 0,
     rawElevMax: 1,

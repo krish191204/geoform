@@ -25,6 +25,7 @@ import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './
 import { clampContinentMass, cohereLand, drownOffshoreSpeckle, fitCoastalLandRatio, landmassStats, massRecipe, reshapeLandmasses } from './mass'
 import { createRng, fbm } from './noise'
 import type { World } from './types'
+import { recomputeTradeRoutes } from './tradeRoutes'
 
 /** Cell (x, y) → flat array index. Memorize this; every file uses it. */
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -281,6 +282,7 @@ export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void 
   relocateOceanCities(world)
   // Drainage runs inside recomputeDerived, after the last land nibble.
   recomputeDerived(world)
+  if (world.tradeRoutes?.length) recomputeTradeRoutes(world)
 }
 
 /** Same as harmonizeWorld. The button is labeled Refresh geography. */

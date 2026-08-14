@@ -10,7 +10,7 @@
  *
  * TypedArrays cannot go in JSON, so we convert them to number[].
  */
-import type { World } from './types'
+import type { TradeRoute, World } from './types'
 import { refreshGeography } from './geography'
 import { landFraction } from './land'
 import { clampContinentMass, DEFAULT_CONTINENT_MASS } from './mass'
@@ -33,6 +33,7 @@ export interface SavedWorld {
   flux: number[]
   biome: string[]
   cities: World['cities']
+  tradeRoutes?: TradeRoute[]
   rawElevMin: number
   rawElevMax: number
   rawSeaThreshold: number
@@ -63,6 +64,10 @@ export function serializeWorld(world: World): SavedWorld {
     flux: Array.from(world.flux),
     biome: world.biome.slice(),
     cities: world.cities.map((c) => ({ ...c })),
+    tradeRoutes: world.tradeRoutes.map((r) => ({
+      ...r,
+      waypoints: r.waypoints.map((p) => ({ ...p })),
+    })),
     rawElevMin: world.rawElevMin,
     rawElevMax: world.rawElevMax,
     rawSeaThreshold: world.rawSeaThreshold,
@@ -99,6 +104,10 @@ export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }):
     biome: data.biome.slice(),
     suitability: new Float32Array(n),
     cities: data.cities.map((c) => ({ ...c })),
+    tradeRoutes: (data.tradeRoutes ?? []).map((r) => ({
+      ...r,
+      waypoints: r.waypoints.map((p) => ({ ...p })),
+    })),
     plateCount: data.plateCount,
     rawElevMin: data.rawElevMin,
     rawElevMax: data.rawElevMax,
