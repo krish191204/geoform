@@ -55,4 +55,14 @@ describe('maritime trade routes', () => {
     expect(route.waypoints[0]).toBeTruthy()
     expect(route.waypoints[route.waypoints.length - 1]).toBeTruthy()
   })
+
+  it('treats ice and polar water as blocked or costly, not open', () => {
+    const world = generateWorld(64, 32, 3, 0.4, 'continents')
+    let polarOrBlocked = 0
+    for (let x = 0; x < world.width; x++) {
+      const cls = classifySeaCell(world, x, 0)
+      if (world.elev[x] < world.seaLevel && (cls === 'blocked' || cls === 'polar')) polarOrBlocked++
+    }
+    expect(polarOrBlocked).toBeGreaterThan(0)
+  })
 })

@@ -264,6 +264,14 @@ export function expandWorld(
     c.x += padLeft
     c.y += padTop
   }
+  if (world.tradeRoutes) {
+    for (const r of world.tradeRoutes) {
+      for (const p of r.waypoints) {
+        p.x += padLeft
+        p.y += padTop
+      }
+    }
+  }
   chewStraightCoasts(world.elev, nw, nh, sea, seed + 33)
   return true
 }

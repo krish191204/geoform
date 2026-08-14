@@ -25,7 +25,7 @@ import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './
 import { clampContinentMass, cohereLand, drownOffshoreSpeckle, fitCoastalLandRatio, landmassStats, massRecipe, reshapeLandmasses } from './mass'
 import { createRng, fbm } from './noise'
 import type { World } from './types'
-import { recomputeTradeRoutes } from './tradeRoutes'
+import { remapTradeRoutes, recomputeTradeRoutes } from './tradeRoutes'
 
 /** Cell (x, y) → flat array index. Memorize this; every file uses it. */
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -175,12 +175,12 @@ export function sculptInlandUplands(world: World): void {
 /** Old saves might lack climate arrays. Allocate them to the current grid size. */
 function ensureArrays(world: World): void {
   const n = world.width * world.height
-  if (world.temp.length === n && world.biome.length === n && world.flux.length === n) return
-  world.temp = new Float32Array(n)
-  world.moist = new Float32Array(n)
-  world.flux = new Float32Array(n)
-  world.biome = new Array(n)
-  world.suitability = new Float32Array(n)
+  if (world.temp.length !== n) world.temp = new Float32Array(n)
+  if (world.moist.length !== n) world.moist = new Float32Array(n)
+  if (world.flux.length !== n) world.flux = new Float32Array(n)
+  if (world.biome.length !== n) world.biome = new Array(n)
+  if (world.suitability.length !== n) world.suitability = new Float32Array(n)
+  if (!world.tradeRoutes) world.tradeRoutes = []
 }
 
 /**
@@ -189,6 +189,7 @@ function ensureArrays(world: World): void {
  */
 function relocateOceanCities(world: World): void {
   const { width: w, height: h, elev, seaLevel } = world
+  const previous = world.cities.slice()
   for (const c of world.cities) {
     if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h && elev[c.y * w + c.x] >= seaLevel) continue
     let bestD = Infinity
@@ -197,7 +198,8 @@ function relocateOceanCities(world: World): void {
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         if (elev[y * w + x] < seaLevel) continue
-        const d = (x - c.x) * (x - c.x) + (y - c.y) * (y - c.y)
+        const dx = Math.min(Math.abs(x - c.x), w - Math.abs(x - c.x))
+        const d = dx * dx + (y - c.y) * (y - c.y)
         if (d < bestD) {
           bestD = d
           bx = x
@@ -213,6 +215,7 @@ function relocateOceanCities(world: World): void {
   world.cities = world.cities.filter(
     (c) => c.x >= 0 && c.y >= 0 && c.x < w && c.y < h && elev[c.y * w + c.x] >= seaLevel,
   )
+  remapTradeRoutes(world, previous)
 }
 
 /**
@@ -236,6 +239,7 @@ export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void 
     // Keep Python climate/biomes; always ensure rivers are visible on the atlas.
     ensureVisibleHydrology(world)
     recomputeSuitability(world)
+    if (world.tradeRoutes?.length) recomputeTradeRoutes(world)
     return
   }
 

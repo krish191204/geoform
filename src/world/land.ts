@@ -10,6 +10,7 @@
  * you do not fight the engine. Growing/shrinking coasts lives in mass.ts.
  */
 import { fbm } from './noise'
+import { remapTradeRoutes } from './tradeRoutes'
 import type { World } from './types'
 
 /** Default Land % slider: 40% of cells should be above water. */
@@ -67,10 +68,12 @@ export function applyLandRatio(world: World, landRatio: number): void {
   }
   world.rawSeaThreshold = world.seaLevel
   const { width: w, height: h, elev, seaLevel } = world
+  const previous = world.cities.slice()
   world.cities = world.cities.filter((c) => {
     if (c.x < 0 || c.y < 0 || c.x >= w || c.y >= h) return false
     return elev[c.y * w + c.x] >= seaLevel
   })
+  remapTradeRoutes(world, previous)
 }
 
 /**

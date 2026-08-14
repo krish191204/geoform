@@ -426,6 +426,7 @@ function strokeRoute(
   pts: { x: number; y: number }[],
   scale: number,
   hazard: TradeRoute['hazard'],
+  width: number,
 ) {
   if (pts.length < 2) return
   ctx.save()
@@ -434,17 +435,21 @@ function strokeRoute(
   ctx.lineJoin = 'round'
   ctx.lineCap = 'round'
   ctx.setLineDash(hazard === 'open' ? [7, 5] : [4, 4])
+  const px = (x: number) => (x + 0.5) * scale
+  const py = (y: number) => (y + 0.5) * scale
   ctx.beginPath()
-  ctx.moveTo((pts[0].x + 0.5) * scale, (pts[0].y + 0.5) * scale)
+  ctx.moveTo(px(pts[0].x), py(pts[0].y))
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1]
     const b = pts[i]
     const dx = b.x - a.x
-    if (Math.abs(dx) > 1) {
-      ctx.lineTo((b.x + 0.5) * scale, (b.y + 0.5) * scale)
-    } else {
-      ctx.lineTo((b.x + 0.5) * scale, (b.y + 0.5) * scale)
+    if (Math.abs(dx) > width / 2) {
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(px(b.x), py(b.y))
+      continue
     }
+    ctx.lineTo(px(b.x), py(b.y))
   }
   ctx.stroke()
   ctx.setLineDash([])
@@ -731,7 +736,7 @@ export class MapRenderer {
     if (opts.showTradeRoutes) {
       drawSeaHazards(ctx, world, scale)
       for (const route of world.tradeRoutes) {
-        strokeRoute(ctx, route.waypoints, scale, route.hazard)
+        strokeRoute(ctx, route.waypoints, scale, route.hazard, world.width)
       }
     }
 

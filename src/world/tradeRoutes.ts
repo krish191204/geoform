@@ -19,14 +19,21 @@ const DIRS = [
 ] as const
 
 const PORT_ROLES = new Set(['fishing', 'trade', 'seat_of_power'])
+const DIAG_COST = 1.35
 
-function latBand(y: number, h: number): number {
-  return Math.abs(y / Math.max(h - 1, 1) - 0.5)
+/** Latitude 0 = north pole, 0.5 = equator. Same frame as climate.ts. */
+function climateLat(world: World, y: number): number {
+  const span = Math.max(1, world.latRows - 1)
+  return Math.max(0, Math.min(1, (y + world.originY) / span))
 }
 
-function biomeBlocked(name: string): boolean {
+function distFromEquator(world: World, y: number): number {
+  return Math.abs(climateLat(world, y) - 0.5)
+}
+
+function iceSea(name: string): boolean {
   const b = name.toLowerCase()
-  return b.includes('ice') || b.includes('polar') || b.includes('tundra')
+  return b.includes('ice') || b.includes('polar')
 }
 
 /** Classify how ships can use an ocean cell. */
@@ -35,9 +42,10 @@ export function classifySeaCell(world: World, x: number, y: number): SeaNavClass
   if (y < 0 || y >= h) return 'blocked'
   const i = idx(w, wrapX(x, w), y)
   if (elev[i] >= seaLevel) return 'blocked'
-  if (biomeBlocked(biome[i])) return 'blocked'
-  if (latBand(y, h) > 0.44 && temp[i] < 0.28) return 'blocked'
-  if (latBand(y, h) > 0.38 || temp[i] < 0.22) return 'polar'
+  if (iceSea(biome[i])) return 'blocked'
+  const pole = distFromEquator(world, y)
+  if (pole > 0.44 && temp[i] < 0.28) return 'blocked'
+  if (pole > 0.38 || temp[i] < 0.22) return 'polar'
   const depth = seaLevel - elev[i]
   if (depth < 0.035) return 'coastal'
   for (const [dx, dy] of DIRS) {
@@ -56,9 +64,12 @@ function moveCost(cls: SeaNavClass): number {
   return 1
 }
 
-function torusDist(ax: number, ay: number, bx: number, by: number, w: number): number {
+/** Wrap-aware octile distance — admissible for cardinal cost 1, diagonal 1.35. */
+function octile(ax: number, ay: number, bx: number, by: number, w: number): number {
   const dx = Math.min(Math.abs(ax - bx), w - Math.abs(ax - bx))
-  return Math.hypot(dx, ay - by)
+  const dy = Math.abs(ay - by)
+  const diag = Math.min(dx, dy)
+  return diag * DIAG_COST + (Math.max(dx, dy) - diag)
 }
 
 function routeHazard(waypoints: { x: number; y: number }[], world: World): TradeRoute['hazard'] {
@@ -115,72 +126,84 @@ function astarRoute(
   to: { x: number; y: number },
 ): { x: number; y: number }[] | null {
   const { width: w, height: h } = world
-  const startKey = `${from.x},${from.y}`
-  const goalKey = `${to.x},${to.y}`
-  if (startKey === goalKey) return [from]
+  const start = idx(w, from.x, from.y)
+  const goal = idx(w, to.x, to.y)
+  if (start === goal) return [from]
 
-  const open = new Set<string>([startKey])
-  const cameFrom = new Map<string, string>()
-  const g = new Map<string, number>([[startKey, 0]])
+  const open: number[] = [start]
+  const inOpen = new Uint8Array(w * h)
+  inOpen[start] = 1
+  const cameFrom = new Int32Array(w * h).fill(-1)
+  const gScore = new Float32Array(w * h).fill(Infinity)
+  gScore[start] = 0
+  const maxSteps = w * h
 
-  const parse = (k: string) => {
-    const [xs, ys] = k.split(',')
-    return { x: Number(xs), y: Number(ys) }
-  }
-
-  while (open.size) {
-    let current = ''
+  for (let steps = 0; steps < maxSteps && open.length; steps++) {
+    let bestI = 0
     let bestF = Infinity
-    for (const k of open) {
-      const p = parse(k)
-      const f = (g.get(k) ?? Infinity) + torusDist(p.x, p.y, to.x, to.y, w)
+    for (let oi = 0; oi < open.length; oi++) {
+      const k = open[oi]
+      const x = k % w
+      const y = (k / w) | 0
+      const f = gScore[k] + octile(x, y, to.x, to.y, w)
       if (f < bestF) {
         bestF = f
-        current = k
+        bestI = oi
       }
     }
-    if (!current) break
-    if (current === goalKey) {
+    const current = open[bestI]
+    open[bestI] = open[open.length - 1]
+    open.pop()
+    inOpen[current] = 0
+    if (current === goal) {
       const path: { x: number; y: number }[] = []
-      let k: string | undefined = current
-      while (k) {
-        path.push(parse(k))
-        k = cameFrom.get(k)
+      let k = current
+      while (k >= 0) {
+        path.push({ x: k % w, y: (k / w) | 0 })
+        k = cameFrom[k]
       }
       path.reverse()
       return path
     }
-    open.delete(current)
-    const cur = parse(current)
-    const gCur = g.get(current) ?? Infinity
+    const cx = current % w
+    const cy = (current / w) | 0
+    const gCur = gScore[current]
     for (const [dx, dy] of DIRS) {
-      const nx = wrapX(cur.x + dx, w)
-      const ny = cur.y + dy
+      const nx = wrapX(cx + dx, w)
+      const ny = cy + dy
       if (ny < 0 || ny >= h) continue
-      const cls = classifySeaCell(world, nx, ny)
-      const step = moveCost(cls)
+      const step = moveCost(classifySeaCell(world, nx, ny))
       if (!Number.isFinite(step)) continue
-      const nk = `${nx},${ny}`
-      const tent = gCur + step * (dx && dy ? 1.35 : 1)
-      if (tent >= (g.get(nk) ?? Infinity)) continue
-      cameFrom.set(nk, current)
-      g.set(nk, tent)
-      open.add(nk)
+      const nk = idx(w, nx, ny)
+      const tent = gCur + step * (dx && dy ? DIAG_COST : 1)
+      if (tent >= gScore[nk]) continue
+      cameFrom[nk] = current
+      gScore[nk] = tent
+      if (!inOpen[nk]) {
+        open.push(nk)
+        inOpen[nk] = 1
+      }
     }
   }
   return null
 }
 
-function simplifyPath(path: { x: number; y: number }[]): { x: number; y: number }[] {
+function wrapDeltaX(dx: number, w: number): number {
+  let x = ((dx % w) + w) % w
+  if (x > w / 2) x -= w
+  return x
+}
+
+function simplifyPath(path: { x: number; y: number }[], w: number): { x: number; y: number }[] {
   if (path.length <= 2) return path
   const out: { x: number; y: number }[] = [path[0]]
   for (let i = 1; i < path.length - 1; i++) {
     const a = out[out.length - 1]
     const b = path[i]
     const c = path[i + 1]
-    const abx = b.x - a.x
+    const abx = wrapDeltaX(b.x - a.x, w)
+    const bcx = wrapDeltaX(c.x - b.x, w)
     const aby = b.y - a.y
-    const bcx = c.x - b.x
     const bcy = c.y - b.y
     if (abx * bcy !== aby * bcx) out.push(b)
   }
@@ -196,7 +219,7 @@ export function routeBetweenPorts(world: World, fromIdx: number, toIdx: number):
   if (!a || !b) return null
   const raw = astarRoute(world, a, b)
   if (!raw || raw.length < 2) return null
-  const waypoints = simplifyPath(raw)
+  const waypoints = simplifyPath(raw, world.width)
   return {
     id: `route-${fromIdx}-${toIdx}`,
     from: fromIdx,
@@ -220,12 +243,19 @@ export function suggestTradeRoutes(world: World): TradeRoute[] {
   const ports = listPortIndices(world)
   if (ports.length < 2) return []
 
+  const cache = new Map<string, TradeRoute | null>()
+  const pair = (a: number, b: number) => {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`
+    if (!cache.has(key)) cache.set(key, routeBetweenPorts(world, a, b))
+    return cache.get(key) ?? null
+  }
+
   const routes: TradeRoute[] = []
   const seen = new Set<string>()
   const add = (from: number, to: number) => {
     const key = from < to ? `${from}:${to}` : `${to}:${from}`
     if (seen.has(key)) return
-    const route = routeBetweenPorts(world, from, to)
+    const route = pair(from, to)
     if (!route) return
     seen.add(key)
     routes.push(route)
@@ -238,15 +268,13 @@ export function suggestTradeRoutes(world: World): TradeRoute[] {
     }
   }
 
-  // Link remaining ports to their nearest reachable neighbor (limited mesh).
   for (const p of ports) {
     let best: { j: number; len: number } | null = null
     for (const q of ports) {
       if (p === q) continue
-      const r = routeBetweenPorts(world, p, q)
+      const r = pair(p, q)
       if (!r) continue
-      const len = r.waypoints.length
-      if (!best || len < best.len) best = { j: q, len }
+      if (!best || r.waypoints.length < best.len) best = { j: q, len: r.waypoints.length }
     }
     if (best) add(p, best.j)
     if (routes.length >= 24) break
@@ -256,13 +284,30 @@ export function suggestTradeRoutes(world: World): TradeRoute[] {
 }
 
 export function recomputeTradeRoutes(world: World): void {
-  if (!world.tradeRoutes.length) return
+  if (!world.tradeRoutes?.length) return
   const next: TradeRoute[] = []
   for (const r of world.tradeRoutes) {
+    if (r.from < 0 || r.to < 0 || r.from >= world.cities.length || r.to >= world.cities.length) continue
     const rebuilt = routeBetweenPorts(world, r.from, r.to)
     if (rebuilt) next.push(rebuilt)
   }
   world.tradeRoutes = next
+}
+
+/** After cities move or drop, keep route endpoints pointing at the same towns. */
+export function remapTradeRoutes(world: World, previousCities: World['cities']): void {
+  if (!world.tradeRoutes?.length) return
+  const next: TradeRoute[] = []
+  for (const r of world.tradeRoutes) {
+    const fromCity = previousCities[r.from]
+    const toCity = previousCities[r.to]
+    const from = fromCity ? world.cities.indexOf(fromCity) : -1
+    const to = toCity ? world.cities.indexOf(toCity) : -1
+    if (from < 0 || to < 0 || from === to) continue
+    next.push({ ...r, from, to })
+  }
+  world.tradeRoutes = next
+  recomputeTradeRoutes(world)
 }
 
 export const SEA_NAV_LABEL: Record<SeaNavClass, string> = {
