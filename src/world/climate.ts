@@ -1,22 +1,29 @@
 /**
  * Weather, rivers, biomes, and "can a city live here?"
  *
- * Nothing in this file invents land. It only *reads* height + sea level and
- * writes temp, rain, river flux, biome labels, and suitability.
+ * Height is the cause. These arrays are the effects — except ensureDrainage,
+ * which nicks height so closed bowls can reach the sea (rivers need an outlet).
  *
- * Temperature: hot at the equator, cold at the poles, colder up mountains
- *   (lapse rate — air cools as it rises).
- * Rain: pretend wind blows west → east along each row. Ocean loads the air
- *   with moisture. When air hits a slope (orography) it dumps rain, then
- *   the far side is a desert (rain shadow).
- * Rivers: every land cell pours into its lowest neighbor. Flux is "how many
- *   upstream cells dumped on me." We wrap X so a river can cross the date line.
- * Drainage: if a cell has no downhill path to the sea, we cut a tiny canyon
- *   toward the ocean so rivers never sit in a closed bowl.
+ * Temperature: hot at the equator, cold at the poles, colder up mountains.
+ * Rain: west → east wind along each row, wrapping the cylinder so the date
+ *   line is not a moisture wall. Ocean loads the air; slopes dump rain
+ *   (orography); the far side is a rain shadow.
+ * Rivers: every land cell pours into its lowest neighbor (D8). X wraps.
+ * Drainage: carve a downhill path toward the sea before we accumulate flux.
+ *
+ * River draw cutoff lives here so hydrology and the atlas stay in sync
+ * (Azgaar-style: continents are never left riverless).
  */
 import type { Biome, SuitabilityResult, World } from './types'
 
+/** Land cells at or above this flux tint as rivers on the atlas. */
+export const RIVER_VISIBLE_MIN = 1.8
+/** Stronger trunk / main-stem tint starts here. */
+export const RIVER_MAIN_MIN = 5.5
+
 const idx = (w: number, x: number, y: number) => y * w + x
+
+const wrapX = (x: number, w: number) => ((x % w) + w) % w
 
 /** Pick a biome name from height + warmth + wetness. Ocean first, then ice, then plants. */
 export function classifyBiome(elev: number, sea: number, temp: number, moist: number): Biome {
@@ -52,17 +59,36 @@ export function recomputeClimate(world: World): void {
       0.35 * Math.cos((lat - 0.5) * Math.PI * 2.2) -
       0.25 * Math.pow(Math.abs(lat - 0.5) * 2, 1.4)
 
-    // West → east prevailing winds; moisture depletes over orography
+    const latTemp = 1 - Math.pow(Math.abs(lat - 0.5) * 2, 1.15)
+
+    // Temperature does not depend on wind — fill first.
+    for (let x = 0; x < w; x++) {
+      const i = idx(w, x, y)
+      const above = Math.max(0, elev[i] - seaLevel)
+      temp[i] = Math.max(0, Math.min(1, latTemp - above * 1.35))
+    }
+
+    /**
+     * Cylinder-safe moisture: walk the row once to prime airMoisture so the
+     * value arriving at x=0 matches what left x=w-1, then walk again to write.
+     */
+    const stepAir = (air: number, x: number): number => {
+      const e = elev[idx(w, x, y)]
+      const above = Math.max(0, e - seaLevel)
+      if (e < seaLevel) return Math.min(1, air + 0.04)
+      const prevE = elev[idx(w, wrapX(x - 1, w), y)]
+      const rise = Math.max(0, e - prevE)
+      const orographic = rise * 4.5
+      return Math.max(0.05, air - orographic * 1.8 - above * 0.08 + (1 - above) * 0.01)
+    }
+
     let airMoisture = band
+    for (let x = 0; x < w; x++) airMoisture = stepAir(airMoisture, x)
 
     for (let x = 0; x < w; x++) {
       const i = idx(w, x, y)
       const e = elev[i]
       const above = Math.max(0, e - seaLevel)
-
-      // Temperature: equator-hot, poles-cold, lapse rate with elevation
-      const latTemp = 1 - Math.pow(Math.abs(lat - 0.5) * 2, 1.15)
-      temp[i] = Math.max(0, Math.min(1, latTemp - above * 1.35))
 
       if (e < seaLevel) {
         moist[i] = 1
@@ -70,14 +96,12 @@ export function recomputeClimate(world: World): void {
         continue
       }
 
-      const prevE = x > 0 ? elev[idx(w, x - 1, y)] : e
+      const prevE = elev[idx(w, wrapX(x - 1, w), y)]
       const rise = Math.max(0, e - prevE)
-      // Orographic lift dumps rain on windward slopes
       const orographic = rise * 4.5
       const localPrecip = Math.max(0, airMoisture * 0.55 + orographic - above * 0.15)
       moist[i] = Math.max(0, Math.min(1, localPrecip))
 
-      // Air dries after dropping rain, especially over high terrain
       airMoisture = Math.max(
         0.05,
         airMoisture - orographic * 1.8 - above * 0.08 + (1 - above) * 0.01,
@@ -107,78 +131,103 @@ const FLOW_DIRS = [
 ] as const
 
 /**
- * Closed bowls trap rivers. Walk from the ocean inland (distance-to-sea),
- * then from the far cells back: if a cell has no downhill neighbor, nick the
- * next cell toward the sea so water can escape. We wrap X. We do not wrap Y.
+ * Closed bowls trap rivers. BFS distance-to-sea, then repeatedly nick cells
+ * along that path until every land cell has a downhill neighbor (or we give up).
+ * Mutates elev. We wrap X. We do not wrap Y.
+ * Deeper multi-pass carving (Azgaar/mewo2-style outlets) so flats drain.
  */
-export function ensureDrainage(world: World): void {
+export function ensureDrainage(world: World, passes = 10): void {
   const { width: w, height: h, elev, seaLevel } = world
-  const dist = new Int32Array(w * h)
-  dist.fill(-1)
-  const q: number[] = []
-  for (let i = 0; i < w * h; i++) {
-    if (elev[i] < seaLevel) {
-      dist[i] = 0
-      q.push(i)
-    }
-  }
-  if (!q.length) return
-  for (let head = 0; head < q.length; head++) {
-    const i = q[head]
-    const x = i % w
-    const y = (i / w) | 0
-    for (const [dx, dy] of CARDINAL) {
-      const nx = (x + dx + w) % w
-      const ny = y + dy
-      if (ny < 0 || ny >= h) continue
-      const ni = idx(w, nx, ny)
-      if (dist[ni] >= 0) continue
-      dist[ni] = dist[i] + 1
-      q.push(ni)
-    }
-  }
+  const n = w * h
+  const dist = new Int32Array(n)
+  const q = new Int32Array(n)
 
-  for (let k = q.length - 1; k >= 0; k--) {
-    const i = q[k]
-    if (dist[i] <= 0) continue
-    const x = i % w
-    const y = (i / w) | 0
-    let hasDown = false
-    let next = -1
-    let nextDist = dist[i]
-    for (const [dx, dy] of CARDINAL) {
-      const nx = (x + dx + w) % w
-      const ny = y + dy
-      if (ny < 0 || ny >= h) continue
-      const ni = idx(w, nx, ny)
-      if (elev[ni] < elev[i] - 1e-6) hasDown = true
-      if (dist[ni] >= 0 && dist[ni] < nextDist) {
-        nextDist = dist[ni]
-        next = ni
+  for (let pass = 0; pass < passes; pass++) {
+    dist.fill(-1)
+    let qLen = 0
+    for (let i = 0; i < n; i++) {
+      if (elev[i] < seaLevel) {
+        dist[i] = 0
+        q[qLen++] = i
       }
     }
-    if (hasDown || next < 0) continue
-    if (elev[next] >= elev[i] && elev[next] >= seaLevel) {
-      // Lower the downhill cell just enough that water can leave. Stay near sea if we hit the coast.
-      elev[next] = Math.max(seaLevel - 0.02, elev[i] - 0.004)
+    if (!qLen) return
+
+    for (let head = 0; head < qLen; head++) {
+      const i = q[head]
+      const x = i % w
+      const y = (i / w) | 0
+      for (const [dx, dy] of CARDINAL) {
+        const nx = wrapX(x + dx, w)
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        const ni = idx(w, nx, ny)
+        if (dist[ni] >= 0) continue
+        dist[ni] = dist[i] + 1
+        q[qLen++] = ni
+      }
     }
+
+    let carved = 0
+    for (let k = qLen - 1; k >= 0; k--) {
+      const i = q[k]
+      if (dist[i] <= 0) continue
+      const x = i % w
+      const y = (i / w) | 0
+      let hasDown = false
+      let next = -1
+      let nextDist = dist[i]
+      for (const [dx, dy] of CARDINAL) {
+        const nx = wrapX(x + dx, w)
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        const ni = idx(w, nx, ny)
+        if (elev[ni] < elev[i] - 1e-6) hasDown = true
+        if (dist[ni] >= 0 && dist[ni] < nextDist) {
+          nextDist = dist[ni]
+          next = ni
+        }
+      }
+      if (hasDown || next < 0) continue
+      // Always open a step toward the sea — deeper cuts on later passes for stubborn pits.
+      const step = 0.01 + pass * 0.006
+      const target = Math.max(seaLevel - 0.02, elev[i] - step)
+      if (elev[next] > target) {
+        elev[next] = target
+        carved++
+      }
+    }
+    if (!carved) break
   }
 }
 
+/** Reusable index buffer so hydrology does not allocate a number[n] every paint. */
+let hydroOrder: Uint32Array | null = null
+
 /**
- * River map: start every land cell with a trickle, then pour downhill from
- * the highest cells so tributaries add up. Ocean cells are skipped.
- * X wraps (cylinder). Y does not (poles).
+ * River map: moisture-weighted runoff pours downhill (D8). X wraps.
+ * Call after climate so moist[] feeds precipitation.
  */
 export function recomputeHydrology(world: World): void {
-  const { width: w, height: h, elev, seaLevel, flux } = world
-  flux.fill(0.01)
+  const { width: w, height: h, elev, seaLevel, flux, moist } = world
+  const n = w * h
 
-  const order: number[] = []
-  for (let i = 0; i < w * h; i++) order.push(i)
+  if (!hydroOrder || hydroOrder.length !== n) hydroOrder = new Uint32Array(n)
+  const order = hydroOrder
+  for (let i = 0; i < n; i++) {
+    order[i] = i
+    if (elev[i] < seaLevel) {
+      flux[i] = 0
+      continue
+    }
+    // Base trickle + rain — enough that large catchments clear the draw cutoff.
+    const rain = moist.length === n ? moist[i] : 0.45
+    flux[i] = 0.045 + rain * 0.12
+  }
   order.sort((a, b) => elev[b] - elev[a])
 
-  for (const i of order) {
+  for (let oi = 0; oi < n; oi++) {
+    const i = order[oi]
     const e = elev[i]
     if (e < seaLevel) continue
     const x = i % w
@@ -186,7 +235,7 @@ export function recomputeHydrology(world: World): void {
     let best = -1
     let bestE = e
     for (const [dx, dy] of FLOW_DIRS) {
-      const nx = (x + dx + w) % w
+      const nx = wrapX(x + dx, w)
       const ny = y + dy
       if (ny < 0 || ny >= h) continue
       const ni = idx(w, nx, ny)
@@ -199,6 +248,46 @@ export function recomputeHydrology(world: World): void {
       flux[best] += flux[i]
     }
   }
+
+  ensureRiverPresence(world)
+}
+
+/**
+ * Big continents must show rivers. If accumulation stayed invisible, scale
+ * flux up so the strongest paths clear the atlas tint (never leave barren land).
+ */
+export function ensureRiverPresence(world: World): void {
+  const { elev, seaLevel, flux } = world
+  let land = 0
+  let maxF = 0
+  for (let i = 0; i < elev.length; i++) {
+    if (elev[i] < seaLevel) continue
+    land++
+    if (flux[i] > maxF) maxF = flux[i]
+  }
+  if (land < 80) return
+  if (maxF >= RIVER_VISIBLE_MIN * 1.25) return
+  const scale = 14 / Math.max(maxF, 1e-4)
+  for (let i = 0; i < flux.length; i++) {
+    if (elev[i] >= seaLevel) flux[i] *= scale
+  }
+}
+
+/**
+ * Drainage + rivers without wiping WorldEngine climate/biomes.
+ * If moisture was never filled, run a quick climate pass first.
+ */
+export function ensureVisibleHydrology(world: World): void {
+  ensureDrainage(world)
+  let moistOk = false
+  for (let i = 0; i < world.moist.length; i++) {
+    if (world.moist[i] > 0.04) {
+      moistOk = true
+      break
+    }
+  }
+  if (!moistOk) recomputeClimate(world)
+  recomputeHydrology(world)
 }
 
 /** Stamp a biome label on every cell. */
@@ -209,7 +298,7 @@ export function recomputeBiomes(world: World): void {
   }
 }
 
-/** How steep is this cell vs its neighbors. Steep = bad for a city. */
+/** How steep is this cell vs its neighbors. Steep = bad for a city. X wraps. */
 function slopeAt(world: World, x: number, y: number): number {
   const { width: w, height: h, elev } = world
   const e = elev[idx(w, x, y)]
@@ -217,9 +306,9 @@ function slopeAt(world: World, x: number, y: number): number {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue
-      const nx = x + dx
+      const nx = wrapX(x + dx, w)
       const ny = y + dy
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      if (ny < 0 || ny >= h) continue
       maxD = Math.max(maxD, Math.abs(elev[idx(w, nx, ny)] - e))
     }
   }
@@ -231,7 +320,7 @@ function slopeAt(world: World, x: number, y: number): number {
  * Near a river or coast = good. This is why cities refuse to sit on water.
  */
 export function evaluateSuitability(world: World, x: number, y: number): SuitabilityResult {
-  const { width: w, elev, seaLevel, moist, flux, biome, temp } = world
+  const { width: w, elev, seaLevel, moist, flux, biome, temp, height: h } = world
   const i = idx(w, x, y)
   const reasons: string[] = []
   let score = 0.5
@@ -273,16 +362,16 @@ export function evaluateSuitability(world: World, x: number, y: number): Suitabi
     score += 0.12
   }
 
-  // Fresh water access
-  let nearRiver = flux[i] > 2.5
+  // Fresh water access — wrap longitude so coasts across the date line count.
+  let nearRiver = flux[i] > RIVER_VISIBLE_MIN * 0.9
   let nearCoast = false
-  for (let dy = -3; dy <= 3 && !nearCoast; dy++) {
+  for (let dy = -3; dy <= 3; dy++) {
     for (let dx = -3; dx <= 3; dx++) {
-      const nx = x + dx
+      const nx = wrapX(x + dx, w)
       const ny = y + dy
-      if (nx < 0 || ny < 0 || nx >= w || ny >= world.height) continue
+      if (ny < 0 || ny >= h) continue
       const ni = idx(w, nx, ny)
-      if (flux[ni] > 3.2) nearRiver = true
+      if (flux[ni] > RIVER_MAIN_MIN * 0.55) nearRiver = true
       if (elev[ni] < seaLevel) nearCoast = true
     }
   }
@@ -318,13 +407,7 @@ export function evaluateSuitability(world: World, x: number, y: number): Suitabi
     }
     score -= 0.15
   }
-  if (
-    b.includes('forest') ||
-    b.includes('steppe') ||
-    b === 'grassland' ||
-    b === 'savanna' ||
-    b.includes('woodland')
-  ) {
+  if (b.includes('forest') || b === 'grassland' || b === 'savanna' || b === 'taiga') {
     score += 0.1
   }
 
@@ -348,11 +431,12 @@ export function recomputeSuitability(world: World): void {
 }
 
 /**
- * Rebuild everything that is *not* height: climate, rivers, biomes, cities-layer.
- * Height is the cause. These arrays are the effects. After a brush stroke we
- * often skip suitability until the stroke ends (it is slower).
+ * Rebuild everything that is *not* the intended height sculpt:
+ * drainage nicks → climate → rivers → biomes → cities-layer.
+ * After a brush stroke we often skip suitability until the stroke ends.
  */
 export function recomputeDerived(world: World, includeSuitability = true): void {
+  ensureDrainage(world)
   recomputeClimate(world)
   recomputeHydrology(world)
   recomputeBiomes(world)

@@ -15,7 +15,11 @@
  *
  * The UI does not pop errors. It just fixes the map.
  */
-import { ensureDrainage, recomputeDerived } from './climate'
+import {
+  ensureVisibleHydrology,
+  recomputeDerived,
+  recomputeSuitability,
+} from './climate'
 import { chewStraightCoasts, meanderCoasts } from './coasts'
 import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './land'
 import { clampContinentMass, cohereLand, drownOffshoreSpeckle, fitCoastalLandRatio, landmassStats, massRecipe, reshapeLandmasses } from './mass'
@@ -109,6 +113,64 @@ export function sculptOrogeny(world: World): void {
   }
 }
 
+/**
+ * Broad inland uplands / plateaus — Azgaar-style interiors are not featureless
+ * coastal shelves. Raise gently where land is away from the shore.
+ */
+export function sculptInlandUplands(world: World): void {
+  const { width: w, height: h, elev, seaLevel, seed } = world
+  const n = w * h
+  const dist = new Int32Array(n)
+  const q = new Int32Array(n)
+  dist.fill(-1)
+  let qLen = 0
+  for (let i = 0; i < n; i++) {
+    if (elev[i] < seaLevel) {
+      dist[i] = 0
+      q[qLen++] = i
+    }
+  }
+  if (!qLen) return
+  for (let head = 0; head < qLen; head++) {
+    const i = q[head]
+    const x = i % w
+    const y = (i / w) | 0
+    for (const [dx, dy] of [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ] as const) {
+      const nx = (x + dx + w) % w
+      const ny = y + dy
+      if (ny < 0 || ny >= h) continue
+      const ni = idx(w, nx, ny)
+      if (dist[ni] >= 0) continue
+      dist[ni] = dist[i] + 1
+      q[qLen++] = ni
+    }
+  }
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = idx(w, x, y)
+      if (elev[i] < seaLevel) continue
+      const d = dist[i]
+      // Mid-interior: gentle plateau; leave coasts and already-high peaks alone.
+      if (d < 4 || d > 28) continue
+      if (elev[i] > seaLevel + 0.38) continue
+      const plateau = fbm(x / 28, y / 24, seed + 61, 3)
+      const rim = fbm(x / 11, y / 10, seed + 77, 2)
+      if (plateau < 0.42) continue
+      const lift =
+        0.035 +
+        (plateau - 0.42) * 0.12 * Math.min(1, (d - 3) / 10) +
+        (rim - 0.5) * 0.025
+      elev[i] = Math.max(seaLevel + 0.02, Math.min(0.78, elev[i] + lift))
+    }
+  }
+}
+
 /** Old saves might lack climate arrays. Allocate them to the current grid size. */
 function ensureArrays(world: World): void {
   const n = world.width * world.height
@@ -155,10 +217,27 @@ function relocateOceanCities(world: World): void {
 /**
  * Make the planet physically possible: seas, coasts, climate, rivers, plates.
  * Call this instead of leaving broken geography for the user to notice.
+ *
+ * WorldEngine maps already have plate landmasses — never run Local continent
+ * reshape on them or Python mountains / painted ridges get drowned and the
+ * atlas looks like it never changed.
  */
 export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void {
   ensureArrays(world)
   ensurePlateMotion(world)
+
+  if (world.engine === 'worldengine') {
+    if (opts?.sculpt) {
+      sculptOrogeny(world)
+      sculptInlandUplands(world)
+    }
+    relocateOceanCities(world)
+    // Keep Python climate/biomes; always ensure rivers are visible on the atlas.
+    ensureVisibleHydrology(world)
+    recomputeSuitability(world)
+    return
+  }
+
   const frac = landFraction(world.elev, world.seaLevel)
   if (frac > MAX_LAND_RATIO + 0.04 || frac < MIN_LAND_RATIO - 0.04) {
     applyLandRatio(world, world.landRatio)
@@ -191,13 +270,16 @@ export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void 
     drownOffshoreSpeckle(world)
     fitCoastalLandRatio(world)
   }
-  if (opts?.sculpt) sculptOrogeny(world)
-  ensureDrainage(world)
+  if (opts?.sculpt) {
+    sculptOrogeny(world)
+    sculptInlandUplands(world)
+  }
   if (mass !== 'islands') {
     drownOffshoreSpeckle(world)
     fitCoastalLandRatio(world)
   }
   relocateOceanCities(world)
+  // Drainage runs inside recomputeDerived, after the last land nibble.
   recomputeDerived(world)
 }
 

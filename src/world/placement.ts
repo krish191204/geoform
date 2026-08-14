@@ -31,9 +31,9 @@ function slopeAt(world: World, x: number, y: number): number {
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue
-      const nx = x + dx
+      const nx = ((x + dx) % w + w) % w
       const ny = y + dy
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      if (ny < 0 || ny >= h) continue
       maxD = Math.max(maxD, Math.abs(elev[ny * w + nx] - e))
     }
   }

@@ -1,8 +1,10 @@
 # Geoform — technical documentation
 
-Geoform is a browser worldbuilding app. Paint a heightfield; climate, rivers, and biomes follow; cities sit where land can support them. Default engine: **Local (browser)**. Typical world: **320×160**.
+Geoform is a browser worldbuilding app. Paint a heightfield; climate, rivers, and biomes follow; cities sit where land can support them. Typical world: **320×160**.
 
-**New here?** Read [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md) first. It explains the grid, land vs sea, and which file does what, in plain English. The source is also commented that way.
+**Split:** **Python** builds New world and authoritative climate (WorldEngine API). **TypeScript** is the paint program — brushes, undo, canvas, instant preview. If Python is offline, Local TypeScript generates the planet instead.
+
+**New here?** Read [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md) first.
 
 Pages:
 
@@ -11,26 +13,24 @@ Pages:
 - Critique `/critique.html` — grade fixtures and Geoform JSON
 - Roadmap `/roadmap.html` — T0 shipped, T1 Earth calibration next
 
-Optional Mindwerks WorldEngine backend remains available as **WorldEngine API**.
-
 ---
 
 ## Architecture
 
 ```
 ┌─────────────────────────────┐     Vite proxy /api/*      ┌──────────────────────────────┐
-│  Browser (Vite + TS)        │ ─────────────────────────► │  ThreadingHTTPServer :8765   │
-│  src/main.ts                │     JSON grids             │  server/worldengine_api.py   │
-│  TypedArrays in memory      │ ◄───────────────────────── │  vendor/worldengine (pip -e) │
-│  Canvas 2D renderer         │                            │  PyPlatec + numpy sims       │
-│  localStorage autosave      │                            └──────────────────────────────┘
-└─────────────────────────────┘
+│  Browser (Vite + TypeScript)│ ─────────────────────────► │  Python :8765                │
+│  Paint, undo, canvas, UI    │     JSON grids             │  server/worldengine_api.py   │
+│  Instant climate preview    │ ◄───────────────────────── │  vendor/worldengine          │
+│  localStorage autosave      │                            │  PyPlatec + numpy sims       │
+└─────────────────────────────┘                            └──────────────────────────────┘
 ```
 
 | Process | Command | Port | Role |
 |---------|---------|------|------|
-| Frontend | `npm run dev` | `127.0.0.1:5173` | UI, brush edits, suitability, render, persist |
-| Backend | `npm run dev:api` | `127.0.0.1:8765` | `world_gen` / climate recompute → JSON |
+| Frontend | `npm run dev` | `127.0.0.1:5173` | UI, brush edits, local preview, render, persist |
+| Backend | `npm run dev:api` | `127.0.0.1:8765` | New world + climate recompute (science) |
+| Both | `npm run dev:all` | both | Recommended when using Python science |
 
 `vite.config.ts` proxies `/api` and `/health` to `:8765` so the browser stays same-origin.
 
@@ -40,8 +40,26 @@ There is **no database**. Runtime state is in-memory typed arrays. Persistence i
 
 ## Setup / run
 
+**Recommended (Python science + TypeScript UI):**
+
 ```bash
-npm run setup:api          # clones vendor/worldengine + creates .venv (gitignored)
+npm install
+npm run setup:api          # once — clones vendor/worldengine + creates .venv
+npm run dev:all            # Vite UI + Python API together
+```
+
+Open `http://127.0.0.1:5173`. The editor probes `/health` and defaults to **Python science** when the API is up.
+
+**UI only (offline Local preview):**
+
+```bash
+npm install
+npm run dev                # Local TypeScript generator — no Python needed
+```
+
+**Two terminals instead of `dev:all`:**
+
+```bash
 npm run dev:api            # terminal 1 → :8765
 npm run dev                # terminal 2 → http://127.0.0.1:5173
 ```
@@ -54,10 +72,10 @@ pip install -e .          # worldengine + PyPlatec, numpy, noise, protobuf, …
 cd ../.. && npm install
 
 npm run dev:api           # terminal 1
-npm run dev               # terminal 2 → http://127.0.0.1:5173
+npm run dev               # terminal 2
 ```
 
-**If the map is blank / “Bad Gateway”:** an old build expected WorldEngine. Current default is **Local (browser)** — just `npm run dev` and hit New world. Optional: `npm run setup:api && npm run dev:api` for WorldEngine.
+**If Python is down:** the app stays usable — New world falls back to Local preview. Status line explains how to start the API.
 
 There is **no cloud account / cloud sync** for worlds. Autosave is `localStorage` in the current browser only; use Export/Import JSON to move maps between machines.
 
@@ -79,7 +97,7 @@ All spatial fields are length `width * height`, row-major (`i = y * width + x`).
 | `cities` | `{x,y,name,score}[]` | Placed settlements |
 | `rawElevMin/Max`, `rawSeaThreshold` | `number` | WorldEngine native elevation calibration for round-trip recompute |
 
-`engine: 'worldengine' | 'local'` marks provenance. Default new worlds are `local`. WorldEngine is opt-in.
+`engine: 'worldengine' | 'local'` marks provenance. Boot prefers **Python science** when `/health` is up; otherwise **Local preview**.
 
 ---
 

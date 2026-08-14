@@ -9,7 +9,7 @@
  * This file is the stamp you click onto the map.
  */
 import { chewStraightCoasts } from './coasts'
-import { ensurePlateMotion, refreshGeography, sculptOrogeny } from './geography'
+import { ensurePlateMotion, refreshGeography, sculptInlandUplands, sculptOrogeny } from './geography'
 import { fbm } from './noise'
 import type { World } from './types'
 
@@ -419,6 +419,7 @@ export function addContinent(
   world.plateCount = newId + 1
   ensurePlateMotion(world)
   sculptOrogeny(world)
+  sculptInlandUplands(world)
   world.cities = world.cities.filter((c) => {
     const i = idx(w, c.x, c.y)
     return i >= 0 && i < elev.length && elev[i] >= seaLevel

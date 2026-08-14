@@ -53,12 +53,14 @@ function riversClimb(world: World): { count: number; x: number; y: number } {
     [0, -1],
   ]
   for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
+    for (let x = 0; x < w; x++) {
       const i = y * w + x
       if (elev[i] < seaLevel || flux[i] < cutoff) continue
       let best = elev[i]
       for (const [dx, dy] of dirs) {
-        best = Math.min(best, elev[(y + dy) * w + (x + dx)])
+        const nx = ((x + dx) % w + w) % w
+        const ny = y + dy
+        best = Math.min(best, elev[ny * w + nx])
       }
       if (elev[i] - best < 1e-5) {
         count++

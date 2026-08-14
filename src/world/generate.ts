@@ -13,7 +13,7 @@
  */
 import { recomputeDerived } from './climate'
 import { chewStraightCoasts, noisyPolarOcean } from './coasts'
-import { refreshGeography, sculptOrogeny } from './geography'
+import { refreshGeography, sculptInlandUplands, sculptOrogeny } from './geography'
 import { applyLandRatio, clampLandRatio, DEFAULT_LAND_RATIO } from './land'
 import {
   clampContinentMass,
@@ -317,10 +317,11 @@ export function generateWorld(
     chewStraightCoasts(world.elev, width, height, world.seaLevel, seed + p * 9)
   }
   sculptOrogeny(world)
+  sculptInlandUplands(world)
   if (recipe.speckleMax > 0) {
     cohereLand(world.elev, width, height, world.seaLevel, Math.max(4, recipe.speckleMax - 6), 6)
   }
-  // Climate, rivers, biomes. sculpt:false because we already raised mountains.
+  // Climate, rivers, biomes. sculpt:false because we already raised mountains + uplands.
   refreshGeography(world, { sculpt: false })
   return world
 }

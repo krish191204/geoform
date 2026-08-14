@@ -7,6 +7,7 @@
  * chrome — not ocean. Ocean is only cells whose height is below sea level.
  */
 import { biomeColor, type Layer, type World } from '../world/types'
+import { RIVER_MAIN_MIN, RIVER_VISIBLE_MIN } from '../world/climate'
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '')
@@ -188,17 +189,19 @@ function cellColor(
     }
   }
 
-  // Rivers — brighter, slightly animated
-  if (
-    riverAmt > 0 &&
-    layer !== 'plates' &&
-    e >= seaLevel &&
-    world.flux[i] >= 3.2
-  ) {
-    const strength = Math.min(1, (world.flux[i] - 3.2) / 10)
-    const pulse = 0.85 + 0.15 * Math.sin(time * 3 + x * 0.2 + y * 0.15)
-    const t = (0.45 + strength * 0.4) * pulse * riverAmt
-    rgb = mix(rgb, [55, 140, 190], t)
+  // Rivers — tributaries faint, main stems brighter (Azgaar-like network)
+  if (riverAmt > 0 && layer !== 'plates' && e >= seaLevel) {
+    const f = world.flux[i]
+    if (f >= RIVER_VISIBLE_MIN) {
+      const isMain = f >= RIVER_MAIN_MIN
+      const strength = isMain
+        ? Math.min(1, (f - RIVER_MAIN_MIN) / 12)
+        : Math.min(1, (f - RIVER_VISIBLE_MIN) / 8)
+      const pulse = 0.85 + 0.15 * Math.sin(time * 3 + x * 0.2 + y * 0.15)
+      const base = isMain ? 0.55 : 0.32
+      const t = (base + strength * 0.38) * pulse * riverAmt
+      rgb = mix(rgb, isMain ? [45, 125, 185] : [70, 155, 195], t)
+    }
   }
 
   // Micro-texture so flats don't look like solid fill
@@ -352,7 +355,10 @@ interface WindParticle {
 function hashWorld(world: World): string {
   const mid = (world.elev.length / 2) | 0
   const q = (world.elev.length / 4) | 0
-  return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
+  const a = (world.elev.length / 5) | 0
+  const b = (world.elev.length / 3) | 0
+  // Sample several cells so paint away from mid/q still busts the bitmap cache.
+  return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.elev[a]}:${world.elev[b]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
 }
 
 /**

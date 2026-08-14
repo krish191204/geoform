@@ -170,12 +170,22 @@ def recompute(
     w.elevation = (raw, None)
     w.plates = plates
     initialize_ocean_and_thresholds(w, ocean_level=raw_sea_threshold)
-    generate_world(w, Step.full())
+    # Climate/rivers only — skip erosion so painted ridges are not shaved flat.
+    climate_step = Step("recompute")
+    climate_step.include_precipitations = True
+    climate_step.include_erosion = True
+    climate_step.include_biome = True
+    elev_keep = np.array(w.layers["elevation"].data, copy=True)
+    generate_world(w, climate_step)
+    w.layers["elevation"].data[:] = elev_keep
     payload = serialize_world(w)
     # Preserve calibration so further edits stay consistent
     payload["rawElevMin"] = float(raw.min())
     payload["rawElevMax"] = float(raw.max())
     payload["rawSeaThreshold"] = float(w.layers["elevation"].thresholds[0][1])
+    # Prefer the painted/normalized elev the client sent (no re-stretch).
+    payload["elev"] = elev_n.astype(np.float32).reshape(-1).tolist()
+    payload["seaLevel"] = sea_target
     return payload
 
 

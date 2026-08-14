@@ -1,12 +1,12 @@
 /**
- * Optional second engine: Mindwerks WorldEngine (Python/WASM behind /api).
+ * Python science backend: Mindwerks WorldEngine behind /api.
  *
- * Default is Local (generate.ts). Only use this if the dropdown says WorldEngine
- * AND the API is actually running. If WASM is missing, the editor stays on Local.
+ * Default when /health is up (see main.ts boot). TypeScript still owns paint
+ * and instant climate preview. If the API is down, Local (generate.ts) takes over.
  *
  * worldFromPayload copies JSON grids into our World shape.
  * fetchWorldEngineWorld asks the server for a new map.
- * recomputeWorldEngine sends your painted heights back for climate.
+ * recomputeWorldEngine sends painted heights back for climate (stroke end only).
  */
 import type { World, WorldEnginePayload } from './types'
 import { recomputeSuitability } from './climate'
@@ -84,6 +84,8 @@ export async function fetchWorldEngineWorld(
 
 /** Send painted heights to WorldEngine and get climate/rivers/biomes back. */
 export async function recomputeWorldEngine(world: World): Promise<World> {
+  // Keep the exact heights the user painted — Python may erode / re-normalize.
+  const paintedElev = Float32Array.from(world.elev)
   const res = await fetch('/api/recompute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -104,7 +106,7 @@ export async function recomputeWorldEngine(world: World): Promise<World> {
     throw new Error(err.error || `WorldEngine recompute failed (${res.status})`)
   }
   const payload = (await res.json()) as WorldEnginePayload
-  return worldFromPayload(payload, world.cities, {
+  const next = worldFromPayload(payload, world.cities, {
     originX: world.originX,
     originY: world.originY,
     latRows: world.latRows,
@@ -112,4 +114,8 @@ export async function recomputeWorldEngine(world: World): Promise<World> {
     plateVx: world.plateVx,
     plateVy: world.plateVy,
   })
+  next.elev.set(paintedElev)
+  next.continentMass = world.continentMass
+  recomputeSuitability(next)
+  return next
 }

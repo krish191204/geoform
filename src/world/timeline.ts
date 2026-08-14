@@ -39,20 +39,32 @@ function cloneShell(world: World): World {
   }
 }
 
-/** Average (x, y) of all land cells — "where is the middle of the land?" */
+/**
+ * Average land position on a cylinder.
+ * Longitude uses circular mean (cos/sin) so a continent wrapping the date line
+ * does not pull the centroid into the ocean at x=0.
+ */
 function landCentroid(world: World): { x: number; y: number } {
-  const { width: w, height: h, elev, seaLevel } = world
-  let x = 0
-  let y = 0
+  const { width: w, elev, seaLevel } = world
+  let sx = 0
+  let sy = 0
+  let ySum = 0
   let n = 0
   for (let i = 0; i < elev.length; i++) {
     if (elev[i] < seaLevel) continue
-    x += i % w
-    y += (i / w) | 0
+    const x = i % w
+    const y = (i / w) | 0
+    const ang = (2 * Math.PI * x) / w
+    sx += Math.cos(ang)
+    sy += Math.sin(ang)
+    ySum += y
     n++
   }
-  if (!n) return { x: w / 2, y: h / 2 }
-  return { x: x / n, y: y / n }
+  if (!n) return { x: w / 2, y: world.height / 2 }
+  let meanAng = Math.atan2(sy / n, sx / n)
+  if (meanAng < 0) meanAng += Math.PI * 2
+  const cx = (meanAng / (Math.PI * 2)) * w
+  return { x: cx, y: ySum / n }
 }
 
 /** Mean distance of land cells from the land centroid — used to test clustering. */

@@ -324,12 +324,21 @@ export function fitCoastalLandRatio(world: World): void {
   const { width: w, height: h, elev, seaLevel: sea, seed } = world
   const nCells = w * h
   const want = Math.round(target * nCells)
+  // One FBM sample per cell, reused across passes — no FBM inside sort comparators.
+  const noise = new Float32Array(nCells)
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      noise[i] = fbm(x / 16, y / 13, seed + 29, 3)
+    }
+  }
+  const candidates: number[] = []
 
-  for (let pass = 0; pass < 48; pass++) {
+  for (let pass = 0; pass < 16; pass++) {
     const have = countLand(elev, sea)
     if (Math.abs(have - want) <= Math.max(12, nCells * 0.012)) break
     const grow = have < want
-    const candidates: number[] = []
+    candidates.length = 0
     for (let y = 1; y < h - 1; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x
@@ -342,9 +351,9 @@ export function fitCoastalLandRatio(world: World): void {
           if (ny < 0 || ny >= h) continue
           if (elev[ny * w + nx] >= sea) nLand++
         }
-    if (grow && nLand === 0) continue // do not sprout a new island in open ocean
-    if (!grow && nLand === 4) continue // inland cell is not a coast
-        if (grow && nLand < 1) continue
+        // Grow only at coasts (touching land). Erode only coastal land (not inland).
+        if (grow && nLand === 0) continue
+        if (!grow && nLand === 4) continue
         candidates.push(i)
       }
     }
@@ -354,20 +363,15 @@ export function fitCoastalLandRatio(world: World): void {
       Math.max(4, Math.round(candidates.length * 0.12)),
       Math.max(6, Math.round(need * 0.28)),
     )
-    candidates.sort((a, b) => {
-      const ax = a % w
-      const ay = (a / w) | 0
-      const bx = b % w
-      const by = (b / w) | 0
-      return (
-        fbm(ax / 16, ay / 13, seed + 29 + pass, 3) - fbm(bx / 16, by / 13, seed + 29 + pass, 3)
-      )
-    })
+    candidates.sort(
+      (a, b) =>
+        noise[a] +
+        ((a * 13 + pass) % 7) * 0.001 -
+        (noise[b] + ((b * 13 + pass) % 7) * 0.001),
+    )
     for (let k = 0; k < batch; k++) {
       const i = candidates[k]
-      const x = i % w
-      const y = (i / w) | 0
-      const n = fbm(x / 9, y / 8, seed + 41, 3)
+      const n = noise[i]
       if (grow) elev[i] = sea + 0.03 + n * 0.05
       else elev[i] = Math.min(elev[i], sea - 0.04 - n * 0.04)
     }

@@ -137,6 +137,13 @@ body {
   color: var(--ink-soft);
 }
 
+.engine-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
 .layout {
   display: grid;
   grid-template-columns: 16.5rem minmax(0, 1fr) 16rem;

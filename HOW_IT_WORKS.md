@@ -4,14 +4,24 @@ You are not supposed to already know this. This file is the tour.
 
 ## What you are looking at
 
-Geoform is a **browser app**. There is no secret cloud computer drawing the map.
+Geoform is a **browser paint program** for planets, plus an optional **Python science** server.
 
 - The map lives in RAM as a bunch of arrays of numbers.
 - The canvas in the page is just a picture of those numbers.
-- When you paint, you change the numbers. Then we redraw the picture.
+- When you paint, TypeScript changes the numbers and redraws instantly.
+- When you click **New world** (with Python up), Python builds the heightfield and climate, then sends the grids to the browser.
 - When you click Save, those numbers become a JSON file on **your** computer.
 
-The GitHub branch with this code is the source. Pull it, run `npm install` then `npm run dev`, open the local URL. That is “saved locally.”
+### Two processes (when using Python science)
+
+| Piece | What it does | How you start it |
+| --- | --- | --- |
+| TypeScript UI (Vite) | Paint, undo, cities, canvas | `npm run dev` or `npm run dev:all` |
+| Python API (:8765) | New world + climate rebuild | `npm run setup:api` once, then `npm run dev:api` or `dev:all` |
+
+If Python is offline, the app still works: **Local preview** generates the planet in the browser instead.
+
+Pull the branch, run `npm install`, then prefer `npm run setup:api` + `npm run dev:all`.
 
 ## One cell = one pixel of planet
 
@@ -45,7 +55,7 @@ Top and bottom are poles. You do **not** wrap in Y. Walking off the north pole i
 
 ## Sea level is one number
 
-`world.seaLevel` is usually `0.34`.
+`world.seaLevel` is usually around `0.34`–`0.42`.
 
 - height **below** sea level → ocean (we draw it blue)
 - height **above** sea level → land
@@ -64,32 +74,38 @@ If you pick Full continents and then paint a lonely rectangle in the ocean, **Re
 
 ## The pipeline (order matters)
 
-1. **Heightfield** — noise, or your paintbrush.
+1. **Heightfield** — Python (or Local noise), or your paintbrush.
 2. **Land / sea** — compare height to sea level.
 3. **Reshape masses** — drown speckles or keep islands, depending on the dropdown.
 4. **Fit land %** — nibble or grow **coasts only**.
 5. **Chew coasts** — break ruler-straight edges so they look like shores.
 6. **Meander** — optional extra wiggling on large worlds.
 7. **Climate** — temperature from latitude + mountain height; rain from trade winds hitting slopes.
-8. **Rivers** — every land cell flows downhill; water that cannot reach the sea gets a canyon cut to the sea.
+8. **Rivers** — every land cell flows downhill (moisture-weighted); closed bowls get outlets cut to the sea. Continents are never left riverless — if flux would stay invisible, the atlas scales trunks so streams show (Azgaar-style networks on a grid).
 9. **Cities** — only on land that can feed people. Ocean cities get moved or deleted.
-10. **Draw** — color pixels.
+10. **Draw** — color pixels. Thin blue = tributaries; darker blue = main stems.
 
-`harmonizeWorld` in `src/world/geography.ts` is the function that runs this quietly. The UI does **not** pop an error. It just fixes the map.
+New world also raises **plate-edge mountains** and **inland uplands/plateaus** so land is not a flat green shelf.
 
-We do **not** run the heavy sculpt on every paint dab. Painting would feel like fighting the engine. Sculpt happens on New world, Add a continent, and Refresh geography.
+While you paint, TypeScript updates climate in the browser so the brush feels instant. With Python selected, a fuller climate rebuild can run when you release the mouse or hit Refresh. Rivers are always re-derived from height so they do not vanish.
+
+`harmonizeWorld` in `src/world/geography.ts` is the quiet repair pipeline on the TypeScript side. The UI does **not** pop an error. It just fixes the map.
+
+We do **not** run heavy sculpt on every paint dab. Painting would feel like fighting the engine. Sculpt happens on New world, Add a continent, and Refresh geography.
 
 ## Files you actually care about
 
 | File | What it is |
 | --- | --- |
-| `src/main.ts` | The editor page. Buttons, paint, autosave. |
+| `src/main.ts` | The editor page. Buttons, paint, autosave, engine choice. |
 | `src/world/types.ts` | The shape of a World. Start here. |
-| `src/world/generate.ts` | Brand new planet from a seed. |
+| `src/world/worldengine.ts` | Talks to the Python API. |
+| `server/worldengine_api.py` | Python science server. |
+| `src/world/generate.ts` | Local (browser) brand-new planet — offline fallback. |
 | `src/world/land.ts` | Land vs water helpers. Flood fill. Grow/erode coasts. |
 | `src/world/mass.ts` | Continents vs islands. The “keep 2–3 blobs” logic. |
 | `src/world/geography.ts` | The quiet repair pipeline. |
-| `src/world/climate.ts` | Temperature, rain, rivers, biomes. |
+| `src/world/climate.ts` | Temperature, rain, rivers, biomes (browser preview). |
 | `src/world/coasts.ts` | Make coasts look organic, not like a rectangle. |
 | `src/world/expand.ts` | Zoom-out adds real cells around the map. |
 | `src/world/persist.ts` | Save / load JSON. Repair on load unless critique says no. |
@@ -100,12 +116,17 @@ We do **not** run the heavy sculpt on every paint dab. Painting would feel like 
 | `src/critique/` | Drop a JSON, score it. Can repair or leave it broken. |
 | `src/roadmap/` | What shipped vs what is still a wish. |
 
-## WorldEngine (the other engine)
+## Python science vs Local preview
 
-There is a second backend behind a dropdown: a WASM port of WorldEngine. It is **optional**. Default is Local. If WASM is missing, we stay on Local. Do not chase WorldEngine files until Local makes sense.
+| Mode | When | Who builds New world |
+| --- | --- | --- |
+| **Python science (WorldEngine)** | Default if `npm run dev:api` is running | Python on `:8765` |
+| **Local preview (browser)** | Offline fallback, or you pick it in World menu | TypeScript `generate.ts` |
+
+Painting is always TypeScript. Never waits on Python mid-stroke.
 
 ## Saving locally
 
-- **In the app:** Save writes `geoform-world.json` through the browser download.
+- **In the app:** Export writes a JSON download.
 - **The code:** this git branch. `git pull` on your machine.
-- Autosave uses `localStorage` in **that** browser. Another machine will not see it unless you save a file.
+- Autosave uses `localStorage` in **that** browser. Another machine will not see it unless you export a file.

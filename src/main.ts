@@ -7,21 +7,35 @@
  *  - `renderer` draws the canvas from those arrays.
  *  - Buttons mutate `world`, then we redraw.
  *
- * Default engine is Local (browser). WorldEngine is the optional dropdown.
- * Typical size: 320×160. Zoom-out adds real cells (expand.ts), it does not
- * CSS-shrink the picture.
+ * Default science: Python WorldEngine when `/health` is up.
+ * TypeScript keeps paint, undo, and instant climate preview.
+ * If Python is down, Local (browser) generates the planet instead.
+ * Typical size: 320×160. Zoom-out adds real cells (expand.ts).
  *
  * If you are lost, open HOW_IT_WORKS.md then src/world/types.ts.
  */
 import './style.css'
 import { navHtml } from './chrome/nav'
 import {
+  clearTutorialDone,
+  isTutorialBlocking,
+  isTutorialDone,
+  startTutorial,
+  tutorialAllowsPaint,
+  tutorialNotifyStrokeEnd,
+} from './chrome/tutorial'
+import {
   continentStyleIcon,
   layerIcon,
   massIcon,
   TOOL_ICONS,
 } from './chrome/toolIcons'
-import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
+import {
+  evaluateSuitability,
+  ensureVisibleHydrology,
+  recomputeDerived,
+  recomputeSuitability,
+} from './world/climate'
 import {
   gateCityPlacement,
   gateContinentPlacement,
@@ -50,7 +64,7 @@ import {
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { expandWorld, padsForZoomOut } from './world/expand'
 import { chewStraightCoasts } from './world/coasts'
-import { refreshGeography } from './world/geography'
+import { ensurePlateMotion, refreshGeography } from './world/geography'
 import { applyLandRatio, DEFAULT_LAND_RATIO, landFraction } from './world/land'
 import {
   clampContinentMass,
@@ -91,7 +105,7 @@ let layer: Layer = 'relief'
 let tool: Tool = 'raise'
 let continentStyle: ContinentStyle = 'collision'
 let brush = 6
-let strength = 0.045
+let strength = 0.09
 let softness = 0.7
 let painting = false
 let strokeActive = false
@@ -158,7 +172,14 @@ function applyWorld(next: World, message: string) {
   syncLandRatioUi()
   syncMassUi()
   syncTimelineUi()
-  refreshGeography(next, { sculpt: false })
+  // WorldEngine already shipped climate — keep it; ensure rivers show on the atlas.
+  if (next.engine === 'worldengine') {
+    ensurePlateMotion(next)
+    ensureVisibleHydrology(next)
+    recomputeSuitability(next)
+  } else {
+    refreshGeography(next, { sculpt: false })
+  }
   renderer.invalidate()
   setStatus(message)
   setClimatePhase('idle')
@@ -509,6 +530,10 @@ function hideConfirm() {
 }
 
 function askNewWorld(run: () => void) {
+  if (isTutorialBlocking()) {
+    setStatus('Finish the tutorial before generating a new world.')
+    return
+  }
   if (!world?.cities.length) {
     run()
     return
@@ -551,11 +576,13 @@ function renderShell() {
           <button type="button" id="export">Export JSON</button>
           <button type="button" id="import">Import JSON</button>
           <input id="importFile" type="file" accept="application/json,.json" hidden />
-          <label for="engine">Backend</label>
-          <select id="engine">
-            <option value="local" selected>Local (browser)</option>
-            <option value="worldengine">WorldEngine API</option>
+          <button type="button" id="replayTutorial">Replay tutorial</button>
+          <label for="engine">Science backend</label>
+          <select id="engine" title="Python builds New world / Refresh. Brushes always paint in the browser.">
+            <option value="worldengine">Python science (WorldEngine)</option>
+            <option value="local">Local preview (browser)</option>
           </select>
+          <p class="hint engine-hint" id="engineHint">Python for New world &amp; climate rebuild. Paint stays instant in the browser.</p>
           <span id="saveMeta" class="save-meta">No save yet</span>
         </div>
       </details>
@@ -578,7 +605,7 @@ function renderShell() {
         </div>
         <div class="slider-row">
           <label>Strength · <span id="strengthVal">${Math.round(strength * 100)}</span></label>
-          <input id="strength" type="range" min="1" max="16" value="${Math.round(strength * 100)}" />
+          <input id="strength" type="range" min="2" max="24" value="${Math.round(strength * 100)}" />
         </div>
         <div class="slider-row">
           <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
@@ -658,10 +685,36 @@ function renderShell() {
   `
   bind()
   startLoop()
-  void boot()
+  void boot().then(() => {
+    beginTutorialIfNeeded()
+  })
 }
 
-/** Is the optional WorldEngine Python API up? If not, we stay on Local. */
+function tutorialHooks() {
+  return {
+    lockChrome: (locked: boolean, practice: boolean) => {
+      app.classList.toggle('tutorial-locked', locked)
+      app.classList.toggle('tutorial-practice', practice)
+    },
+    setRaiseTool: () => setTool('raise'),
+    setStatus,
+  }
+}
+
+function beginTutorialIfNeeded() {
+  if (isTutorialDone()) return
+  setMapHint(false)
+  startTutorial(document.body, tutorialHooks())
+}
+
+function replayTutorial() {
+  clearTutorialDone()
+  document.querySelector<HTMLDetailsElement>('#worldMenu')?.removeAttribute('open')
+  setMapHint(false)
+  startTutorial(document.body, tutorialHooks())
+}
+
+/** Is the Python WorldEngine API up? If not, we use Local. */
 async function apiHealthy(): Promise<boolean> {
   try {
     const res = await fetch('/health', { cache: 'no-store' })
@@ -681,6 +734,35 @@ function hideApiDown() {
   }
 }
 
+/** Keep the dropdown + hint in sync with engineChoice. */
+function syncEngineUi(note?: string) {
+  const sel = document.querySelector<HTMLSelectElement>('#engine')
+  if (sel) sel.value = engineChoice
+  const hint = document.querySelector('#engineHint')
+  if (!hint) return
+  if (note) {
+    hint.textContent = note
+    return
+  }
+  hint.textContent =
+    engineChoice === 'worldengine'
+      ? 'Python builds New world & climate rebuild. Brushes still paint instantly in the browser.'
+      : 'Local browser generator — works offline. Switch to Python science when the API is running.'
+}
+
+/** Prefer Python science when healthy; otherwise Local. */
+async function preferPythonScience(): Promise<boolean> {
+  const ok = await apiHealthy()
+  if (ok) {
+    engineChoice = 'worldengine'
+    syncEngineUi()
+    return true
+  }
+  engineChoice = 'local'
+  syncEngineUi('Python API offline — using Local preview. Run npm run dev:api (or npm run dev:all).')
+  return false
+}
+
 /** New world using the TypeScript generator. Always works offline. */
 function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
@@ -690,7 +772,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
     clearAutosave()
     applyWorld(
       next,
-      note ?? `Seed ${next.seed} · paint ridges, coasts, and cities — climate follows`,
+      note ?? `Local seed ${next.seed} · paint ridges, coasts, and cities — climate follows`,
     )
     hideApiDown()
     hideConfirm()
@@ -701,12 +783,13 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   }
 }
 
-/** First paint: restore autosave if this browser has one, else generate a new seed. */
+/**
+ * Boot: prefer Python science when /health is up.
+ * Restore autosave if present; otherwise generate a new world on the chosen engine.
+ */
 async function boot() {
   hideApiDown()
-  engineChoice = 'local'
-  const sel = document.querySelector<HTMLSelectElement>('#engine')
-  if (sel) sel.value = 'local'
+  const pythonUp = await preferPythonScience()
 
   const saved = loadAutosave()
   if (saved) {
@@ -717,9 +800,19 @@ async function boot() {
     const el = document.querySelector('#saveMeta')
     if (el) el.textContent = 'Restored from browser autosave'
     setMapHint(false)
+    setStatus(
+      pythonUp
+        ? `Restored autosave · Python science ready for New world`
+        : `Restored autosave · Local preview (Python API offline)`,
+    )
     return
   }
-  loadLocalWorld(seed)
+
+  if (pythonUp) {
+    await loadWorld(seed)
+  } else {
+    loadLocalWorld(seed, 'Local seed — start npm run dev:api for Python science.')
+  }
 }
 
 function setBusy(on: boolean, message?: string) {
@@ -734,29 +827,29 @@ function setBusy(on: boolean, message?: string) {
   })
 }
 
-/** New world: Local generator, or WorldEngine if you picked that dropdown and the API is up. */
+/** New world: Python science when selected and healthy; otherwise Local. */
 async function loadWorld(nextSeed: number) {
   if (engineChoice !== 'worldengine') {
     loadLocalWorld(nextSeed)
     return
   }
   setBusy(true, 'Raising continents…')
-  setStatus('Trying WorldEngine…')
+  setStatus('Asking Python science…')
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
     const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
     next.landRatio = landRatio
     next.continentMass = continentMass
     clearAutosave()
-    applyWorld(next, `WorldEngine seed ${next.seed}`)
+    applyWorld(next, `Python science seed ${next.seed}`)
     hideApiDown()
     setMapHint(true)
+    syncEngineUi()
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     engineChoice = 'local'
-    const sel = document.querySelector<HTMLSelectElement>('#engine')
-    if (sel) sel.value = 'local'
-    loadLocalWorld(nextSeed, `Backend unavailable (${msg}) — local engine ready.`)
+    syncEngineUi(`Python unavailable (${msg}) — switched to Local preview.`)
+    loadLocalWorld(nextSeed, `Python unavailable (${msg}) — local engine ready.`)
   } finally {
     setBusy(false)
   }
@@ -772,7 +865,8 @@ function scheduleClimateRecompute(immediate = false) {
     const useLocal =
       world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
     if (useLocal) {
-      refreshGeography(world, { sculpt: false })
+      // Climate only — do not reshape continents after every brush stroke.
+      recomputeDerived(world)
       if (timelineAge > 0.5) timelineView = reconstructPast(world, timelineAge)
       renderer.invalidate()
       scheduleAutosave()
@@ -782,25 +876,27 @@ function scheduleClimateRecompute(immediate = false) {
       updateGeoFlags()
       return
     }
-    setStatus('Recomputing climate…')
+    setStatus('Asking Python for climate…')
     setClimatePhase('updating')
     try {
       const next = await recomputeWorldEngine(world)
       if (gen !== recomputeGeneration) return
       // preserve history by mutating fields instead of applyWorld wipe
       world = next
-      refreshGeography(world, { sculpt: false })
+      ensurePlateMotion(world)
+      ensureVisibleHydrology(world)
+      recomputeSuitability(world)
       renderer.invalidate()
-      setStatus('Climate updated.')
+      setStatus('Python climate updated.')
       setClimatePhase('idle')
       updateInspector()
       updateCities()
       scheduleAutosave()
     } catch {
       if (!world) return
-      refreshGeography(world, { sculpt: false })
+      recomputeDerived(world)
       renderer.invalidate()
-      setStatus('Used local climate after backend failure.')
+      setStatus('Used local climate after Python failure.')
       setClimatePhase('idle')
       updateInspector()
     }
@@ -827,6 +923,7 @@ function endStroke() {
     chewStraightCoasts(world.elev, world.width, world.height, world.seaLevel, world.seed + 21)
     renderer.invalidate()
   }
+  tutorialNotifyStrokeEnd()
   setClimatePhase('updating')
   scheduleClimateRecompute(true)
 }
@@ -879,6 +976,11 @@ function doRedo() {
 }
 
 function setTool(next: Tool) {
+  if (isTutorialBlocking() && !tutorialAllowsPaint()) return
+  if (isTutorialBlocking() && tutorialAllowsPaint() && next !== 'raise' && next !== 'ridge') {
+    setStatus('Tutorial: keep using Raise (or Ridge) on the map.')
+    return
+  }
   tool = next
   const tools = document.querySelector('#tools')
   tools?.querySelectorAll('.tool').forEach((b) => {
@@ -1021,8 +1123,24 @@ function bind() {
   document.querySelector('#viewAtlas')?.addEventListener('click', () => setViewMode('atlas'))
   document.querySelector('#viewPlanet')?.addEventListener('click', () => setViewMode('planet'))
 
-  document.querySelector('#engine')?.addEventListener('change', (e) => {
-    engineChoice = (e.target as HTMLSelectElement).value as EngineChoice
+  document.querySelector('#engine')?.addEventListener('change', async (e) => {
+    const next = (e.target as HTMLSelectElement).value as EngineChoice
+    if (next === 'worldengine') {
+      setStatus('Checking Python science…')
+      if (!(await apiHealthy())) {
+        engineChoice = 'local'
+        syncEngineUi('Python API offline — stay on Local, or run npm run dev:api.')
+        setStatus('Python science offline — using Local preview.')
+        return
+      }
+      engineChoice = 'worldengine'
+      syncEngineUi()
+      setStatus('Python science ready — New world & Refresh use the API. Paint stays local.')
+      return
+    }
+    engineChoice = 'local'
+    syncEngineUi()
+    setStatus('Local preview — New world runs entirely in the browser.')
   })
 
   document.querySelector('#brush')!.addEventListener('input', (e) => {
@@ -1075,6 +1193,31 @@ function bind() {
     if (!world) return
     if (timelineAge > 0.5) setTimelineAge(0)
     setClimatePhase('updating')
+    if (world.engine === 'worldengine' && engineChoice === 'worldengine') {
+      // Keep plate mountains from Python; refresh climate without Local reshape.
+      void (async () => {
+        try {
+          if (await apiHealthy()) {
+            world = await recomputeWorldEngine(world!)
+            ensurePlateMotion(world)
+            ensureVisibleHydrology(world)
+            recomputeSuitability(world)
+            setStatus('Python climate refreshed — heights kept.')
+          } else {
+            recomputeDerived(world!)
+            setStatus('API offline — local climate from current heights.')
+          }
+        } catch {
+          recomputeDerived(world!)
+          setStatus('Used local climate after Python failure.')
+        }
+        renderer.invalidate()
+        setClimatePhase('idle')
+        updateInspector()
+        scheduleAutosave()
+      })()
+      return
+    }
     refreshGeography(world, { sculpt: true })
     renderer.invalidate()
     setClimatePhase('idle')
@@ -1107,7 +1250,10 @@ function bind() {
   })
 
   document.querySelector('#regen')!.addEventListener('click', () => {
-    if (busy) return
+    if (busy || isTutorialBlocking()) {
+      if (isTutorialBlocking()) setStatus('Finish the tutorial before generating a new world.')
+      return
+    }
     askNewWorld(() => {
       seed = (Math.random() * 1e9) | 0
       const seedInput = document.querySelector<HTMLInputElement>('#seed')
@@ -1125,7 +1271,16 @@ function bind() {
     setStatus(`Exported geoform-seed-${world.seed}.json`)
   })
   const importFile = document.querySelector<HTMLInputElement>('#importFile')!
-  document.querySelector('#import')!.addEventListener('click', () => importFile.click())
+  document.querySelector('#import')!.addEventListener('click', () => {
+    if (isTutorialBlocking()) {
+      setStatus('Finish the tutorial before importing.')
+      return
+    }
+    importFile.click()
+  })
+  document.querySelector('#replayTutorial')?.addEventListener('click', () => {
+    replayTutorial()
+  })
   importFile.addEventListener('change', () => {
     const file = importFile.files?.[0]
     importFile.value = ''
@@ -1153,6 +1308,10 @@ function bind() {
       e.preventDefault()
     }
     if (typing) return
+    if (isTutorialBlocking() && !tutorialAllowsPaint()) {
+      e.preventDefault()
+      return
+    }
 
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault()
@@ -1212,6 +1371,10 @@ function bind() {
 
   const applyAt = (clientX: number, clientY: number, shiftKey: boolean) => {
     if (!world || busy) return
+    if (isTutorialBlocking() && !tutorialAllowsPaint()) {
+      setStatus('Finish reading the tutorial card first.')
+      return
+    }
     if (timelineAge > 0.5 && tool !== 'inspect') setTimelineAge(0)
     const cell = pickCell(clientX, clientY)
     if (!cell) return

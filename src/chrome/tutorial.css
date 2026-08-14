@@ -1,0 +1,158 @@
+/* First-run tutorial — blocks the editor until the user finishes. */
+
+.tutorial-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  pointer-events: auto;
+  background:
+    radial-gradient(900px 500px at 20% 10%, rgba(200, 210, 200, 0.35), transparent 55%),
+    rgba(18, 24, 20, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.tutorial-root[data-mode='practice'] {
+  background: rgba(18, 24, 20, 0.28);
+  place-items: end center;
+  padding-bottom: 1.5rem;
+  pointer-events: none;
+}
+
+.tutorial-root[data-mode='practice'] .tutorial-card {
+  pointer-events: auto;
+}
+
+.tutorial-card {
+  width: min(34rem, 100%);
+  background: #f3eee3;
+  color: #1c221c;
+  border-radius: 18px;
+  border: 1px solid rgba(28, 34, 28, 0.14);
+  box-shadow: 0 24px 60px rgba(12, 16, 14, 0.4);
+  padding: 1.35rem 1.45rem 1.25rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.tutorial-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #5a655a;
+}
+
+.tutorial-card h2 {
+  margin: 0;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.55rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.tutorial-card p {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.45;
+  color: #2a322a;
+}
+
+.tutorial-card ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: #2a322a;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tutorial-card li {
+  line-height: 1.4;
+}
+
+.tutorial-progress {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.tutorial-progress span {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(28, 34, 28, 0.18);
+}
+
+.tutorial-progress span.done {
+  background: #4a6b45;
+}
+
+.tutorial-progress span.current {
+  background: #b85a2a;
+  transform: scale(1.25);
+}
+
+.tutorial-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.tutorial-actions .tutorial-next,
+.tutorial-actions .tutorial-primary {
+  border: none;
+  border-radius: 999px;
+  padding: 0.65rem 1.2rem;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  background: #1c221c;
+  color: #f3eee3;
+}
+
+.tutorial-actions .tutorial-next:disabled,
+.tutorial-actions .tutorial-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tutorial-actions .tutorial-ghost {
+  border: 1px solid rgba(28, 34, 28, 0.2);
+  border-radius: 999px;
+  padding: 0.55rem 0.95rem;
+  font: inherit;
+  background: transparent;
+  color: #1c221c;
+  cursor: pointer;
+}
+
+.tutorial-wait {
+  font-size: 0.9rem;
+  color: #6a5540;
+  font-weight: 600;
+}
+
+#app.tutorial-locked .chrome,
+#app.tutorial-locked .panel,
+#app.tutorial-locked .map-overlay,
+#app.tutorial-locked .map-hud {
+  pointer-events: none;
+  filter: grayscale(0.25) brightness(0.92);
+}
+
+#app.tutorial-locked.tutorial-practice .map-viewport,
+#app.tutorial-locked.tutorial-practice #map {
+  pointer-events: auto;
+  filter: none;
+}
+
+#app.tutorial-locked.tutorial-practice .map-shell {
+  outline: 3px solid rgba(184, 90, 42, 0.85);
+  outline-offset: -3px;
+  border-radius: 12px;
+}
