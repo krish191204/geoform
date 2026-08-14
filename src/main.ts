@@ -853,7 +853,7 @@ function renderShell() {
             <textarea id="directorPrompt" rows="3" spellcheck="true" placeholder="Make the east coast wetter and add a mining town in the highlands"></textarea>
           </label>
           <button type="button" id="directorRun">Apply</button>
-          <p class="hint" id="directorStatus">Plain English → raise, rivers, settlements. Put GEMINI_API_KEY in .env.local, then npm run dev:api.</p>
+          <p class="hint" id="directorStatus">Plain English → raise, rivers, and settlements.</p>
         </div>
 
         <h3>Cities</h3>
@@ -913,15 +913,44 @@ function replayTutorial() {
 }
 
 /** Is the Python WorldEngine API up? If not, we use Local. */
-async function apiHealthy(): Promise<boolean> {
+async function fetchApiHealth(): Promise<{ ok: boolean; directorGemini?: boolean }> {
   try {
     const res = await fetch('/health', { cache: 'no-store' })
-    if (!res.ok) return false
-    const body = (await res.json()) as { ok?: boolean }
-    return body.ok === true
+    if (!res.ok) return { ok: false }
+    const body = (await res.json()) as { ok?: boolean; directorGemini?: boolean }
+    return { ok: body.ok === true, directorGemini: body.directorGemini === true }
   } catch {
-    return false
+    return { ok: false }
   }
+}
+
+async function apiHealthy(): Promise<boolean> {
+  return (await fetchApiHealth()).ok
+}
+
+function updateDirectorStatus(health?: { ok: boolean; directorGemini?: boolean }) {
+  const el = document.querySelector('#directorStatus')
+  if (!el) return
+  if (import.meta.env.PROD) {
+    if (health?.ok && health.directorGemini) {
+      el.textContent = 'Plain English → raise, rivers, and settlements. AI Director is connected.'
+      return
+    }
+    el.textContent =
+      'Plain English → raise, rivers, and settlements. Uses built-in rules in your browser.'
+    return
+  }
+  if (health?.ok && health.directorGemini) {
+    el.textContent = 'Plain English → raise, rivers, and settlements. AI Director ready (Gemini).'
+    return
+  }
+  if (health?.ok) {
+    el.textContent =
+      'Plain English → raise, rivers, and settlements. API is up — add GEMINI_API_KEY in .env.local for AI.'
+    return
+  }
+  el.textContent =
+    'Plain English → raise, rivers, and settlements. Built-in rules work now; run npm run dev:api for Python science and Gemini.'
 }
 
 function hideApiDown() {
@@ -945,19 +974,26 @@ function syncEngineUi(note?: string) {
   hint.textContent =
     engineChoice === 'worldengine'
       ? 'Python builds New world & climate rebuild. Brushes still paint instantly in the browser.'
-      : 'Local browser generator — works offline. Switch to Python science when the API is running.'
+      : import.meta.env.PROD
+        ? 'Local browser generator — the full map editor runs in your browser.'
+        : 'Local browser generator — works offline. Switch to Python science when the API is running.'
 }
 
 /** Prefer Python science when healthy; otherwise Local. */
 async function preferPythonScience(): Promise<boolean> {
-  const ok = await apiHealthy()
-  if (ok) {
+  const health = await fetchApiHealth()
+  updateDirectorStatus(health)
+  if (health.ok) {
     engineChoice = 'worldengine'
     syncEngineUi()
     return true
   }
   engineChoice = 'local'
-  syncEngineUi('Python API offline — using Local preview. Run npm run dev:api (or npm run dev:all).')
+  syncEngineUi(
+    import.meta.env.PROD
+      ? undefined
+      : 'Python API offline — using Local preview. Run npm run dev:api (or npm run dev:all).',
+  )
   return false
 }
 
@@ -1010,7 +1046,12 @@ async function boot() {
   if (pythonUp) {
     await loadWorld(seed)
   } else {
-    loadLocalWorld(seed, 'Local seed — start npm run dev:api for Python science.')
+    loadLocalWorld(
+      seed,
+      import.meta.env.PROD
+        ? `Local seed ${seed} · paint ridges, coasts, and cities`
+        : 'Local seed — start npm run dev:api for Python science.',
+    )
   }
 }
 
@@ -1349,12 +1390,20 @@ function bind() {
       setStatus('Checking Python science…')
       if (!(await apiHealthy())) {
         engineChoice = 'local'
-        syncEngineUi('Python API offline — stay on Local, or run npm run dev:api.')
+        syncEngineUi(
+          import.meta.env.PROD
+            ? 'Python science needs a server — staying on Local preview.'
+            : 'Python API offline — stay on Local, or run npm run dev:api.',
+        )
         showCoach({
           ...coachEngine('local'),
           title: 'Python offline',
-          tip: 'API is not running. Staying on Local preview.',
-          next: 'Run npm run dev:api (or npm run dev:all), then pick Python science again.',
+          tip: import.meta.env.PROD
+            ? 'This hosted site runs the browser engine only.'
+            : 'API is not running. Staying on Local preview.',
+          next: import.meta.env.PROD
+            ? 'Local preview has the full map editor in your browser.'
+            : 'Run npm run dev:api (or npm run dev:all), then pick Python science again.',
           tone: 'warn',
         })
         return

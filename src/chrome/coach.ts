@@ -209,7 +209,9 @@ export function coachEngine(engine: 'worldengine' | 'local'): CoachMessage {
   return {
     title: 'Local preview',
     tip: 'Everything runs in this browser — fine offline, slightly simpler science.',
-    next: 'Switch to Python science when npm run dev:api is up for fuller climate.',
+    next: import.meta.env.PROD
+      ? 'The full map editor works here without a server.'
+      : 'Switch to Python science when npm run dev:api is up for fuller climate.',
     tone: 'tip',
   }
 }
