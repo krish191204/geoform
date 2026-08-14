@@ -190,6 +190,8 @@ let timelineView: World | null = null
 let timelineTimer: number | null = null
 let showTradeRoutes = false
 let settlementCoveragePct = 35
+/** Keep the loading overlay up until the first atlas bitmap is drawn. */
+let mapPaintPending = false
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -366,6 +368,8 @@ function applyWorld(next: World, message: string) {
   } else {
     refreshGeography(next, { sculpt: false })
   }
+  mapPaintPending = true
+  setBusy(true, 'Rendering map…')
   invalidateRenderer()
   announceChange(
     'A new planet is on the map',
@@ -1115,8 +1119,10 @@ function loadLocalWorld(nextSeed: number, note?: string) {
     hideConfirm()
     setMapHint(true)
     setClimatePhase('idle')
-  } finally {
+  } catch (err) {
+    mapPaintPending = false
     setBusy(false)
+    throw err
   }
 }
 
@@ -1193,8 +1199,6 @@ async function loadWorld(nextSeed: number) {
     engineChoice = 'local'
     syncEngineUi(`Python unavailable (${msg}) — switched to Local preview.`)
     loadLocalWorld(nextSeed, `Python unavailable (${msg}) — local engine ready.`)
-  } finally {
-    setBusy(false)
   }
 }
 
@@ -1482,8 +1486,21 @@ function bind() {
       planetLayout = { w: 0, h: 0 }
       layoutPlanetIfNeeded()
       requestRender()
-    } else applyViewTransform()
+    } else {
+      applyViewTransform()
+      invalidateRenderer()
+    }
   })
+
+  const mapViewport = document.querySelector('#mapViewport')
+  if (mapViewport && typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      if (viewMode !== 'atlas' || !world) return
+      applyViewTransform()
+      invalidateRenderer()
+    })
+    ro.observe(mapViewport)
+  }
   document.querySelector('#viewAtlas')?.addEventListener('click', () => setViewMode('atlas'))
   document.querySelector('#viewPlanet')?.addEventListener('click', () => setViewMode('planet'))
 
@@ -2348,6 +2365,10 @@ function paint() {
   if (!canvas) return
   const ctx = canvas.getContext('2d')!
   renderer.draw(ctx, src, atlasDrawOpts())
+  if (mapPaintPending) {
+    mapPaintPending = false
+    setBusy(false)
+  }
 }
 
 function updateInspector() {
