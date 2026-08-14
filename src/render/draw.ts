@@ -408,9 +408,9 @@ export interface DrawOptions {
 }
 
 const HAZARD_TINT: Record<SeaNavClass, [number, number, number, number]> = {
-  blocked: [120, 28, 28, 0.42],
-  coastal: [180, 110, 40, 0.28],
-  polar: [140, 170, 210, 0.32],
+  blocked: [120, 28, 28, 0.28],
+  coastal: [180, 110, 40, 0.22],
+  polar: [140, 170, 210, 0.24],
   open: [0, 0, 0, 0],
 }
 
@@ -456,24 +456,66 @@ function strokeRoute(
   ctx.restore()
 }
 
+/** Soft hazard wash — bilinear upsample so the overlay is not chunky cell squares. */
 function drawSeaHazards(
   ctx: CanvasRenderingContext2D,
   world: World,
   scale: number,
 ) {
   const { width: w, height: h, seaLevel, elev } = world
-  ctx.save()
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (elev[y * w + x] >= seaLevel) continue
-      const cls = classifySeaCell(world, x, y)
-      const tint = HAZARD_TINT[cls]
-      if (tint[3] <= 0) continue
-      ctx.fillStyle = `rgba(${tint[0]}, ${tint[1]}, ${tint[2]}, ${tint[3]})`
-      ctx.fillRect(x * scale, y * scale, scale, scale)
+  const cw = w * scale
+  const ch = h * scale
+  const image = new ImageData(cw, ch)
+  const data = image.data
+
+  const sample = (x: number, y: number): [number, number, number, number] => {
+    if (y < 0 || y >= h || elev[y * w + x] >= seaLevel) return [0, 0, 0, 0]
+    return HAZARD_TINT[classifySeaCell(world, x, y)]
+  }
+
+  const mixA = (
+    a: [number, number, number, number],
+    b: [number, number, number, number],
+    t: number,
+  ): [number, number, number, number] => [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t,
+    a[3] + (b[3] - a[3]) * t,
+  ]
+
+  for (let py = 0; py < ch; py++) {
+    const yf = py / scale
+    const y0 = Math.min(h - 1, yf | 0)
+    const y1 = Math.min(h - 1, y0 + 1)
+    const fy = yf - y0
+    for (let px = 0; px < cw; px++) {
+      const xf = px / scale
+      const x0 = wrapX(xf | 0, w)
+      const x1 = wrapX((xf | 0) + 1, w)
+      const fx = xf - (xf | 0)
+      const c00 = sample(x0, y0)
+      const c10 = sample(x1, y0)
+      const c01 = sample(x0, y1)
+      const c11 = sample(x1, y1)
+      const top = mixA(c00, c10, fx)
+      const bot = mixA(c01, c11, fx)
+      const [r, g, b, a] = mixA(top, bot, fy)
+      const o = (py * cw + px) * 4
+      data[o] = clamp(r)
+      data[o + 1] = clamp(g)
+      data[o + 2] = clamp(b)
+      data[o + 3] = clamp(a * 255)
     }
   }
+
+  ctx.save()
+  ctx.putImageData(image, 0, 0)
   ctx.restore()
+}
+
+function wrapX(x: number, w: number): number {
+  return ((x % w) + w) % w
 }
 
 interface WindParticle {

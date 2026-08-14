@@ -36,7 +36,7 @@ export const QUALITY_PRESETS: Record<MapQuality, QualityPreset> = {
     globeWidthSegments: 128,
     globeHeightSegments: 96,
     displacementScale: 0.055,
-    rasterAdjust: 0,
+    rasterAdjust: 1,
   },
   high: {
     id: 'high',

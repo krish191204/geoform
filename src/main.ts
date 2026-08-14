@@ -761,7 +761,7 @@ function renderShell() {
           <button type="button" id="suggestTradeRoutes">Suggest trade routes</button>
           <button type="button" id="clearTradeRoutes">Clear routes</button>
         </div>
-        <p class="hint">Gold dashed lines are shipping lanes between ports. Red/amber/blue tints mark shallow coasts, polar ice, and blocked waters ships avoid.</p>
+        <p class="hint">Gold dashed lines are shipping lanes. Amber / blue / red washes mark shallow coasts, polar ice, and blocked waters — toggle off if you only want the terrain.</p>
 
         <h3>Actions</h3>
         <div class="action-row">
