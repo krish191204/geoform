@@ -3,7 +3,10 @@ import { generateWorld } from '../../src/world/generate'
 import {
   inferSettlementRole,
   scoreSettlementRole,
+  settlementCapacity,
+  settlementCountForCoverage,
   suggestSettlementMix,
+  suggestSettlementsCovering,
   suggestSettlementsForRole,
 } from '../../src/world/settlements'
 
@@ -36,5 +39,21 @@ describe('settlement roles', () => {
     expect(farms.every((c) => c.role === 'farmland')).toBe(true)
     const role = inferSettlementRole(world, farms[0].x, farms[0].y)
     expect(['farmland', 'pastoral', 'trade']).toContain(role)
+  })
+
+  it('scales settlement count with coverage slider', () => {
+    const world = generateWorld(96, 48, 12, 0.4, 'continents')
+    const low = suggestSettlementsCovering(world, 'mix', 0.2)
+    const high = suggestSettlementsCovering(world, 'mix', 1)
+    expect(high.length).toBeGreaterThan(low.length)
+    expect(settlementCountForCoverage(world, 1)).toBeGreaterThan(settlementCountForCoverage(world, 0.2))
+    expect(settlementCapacity(world)).toBeGreaterThan(0)
+  })
+
+  it('packs more towns at maximal coverage than the default mix', () => {
+    const world = generateWorld(96, 48, 21, 0.4, 'continents')
+    const mix = suggestSettlementMix(world)
+    const packed = suggestSettlementsCovering(world, 'mix', 1)
+    expect(packed.length).toBeGreaterThan(mix.length)
   })
 })

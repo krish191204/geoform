@@ -203,17 +203,23 @@ function roleScorer(role: SettlementRole) {
 
 const MIN_ROLE_SCORE = 0.22
 const SPACING = 8
+/** Hard cap so the atlas stays readable even on High quality grids. */
+export const MAX_SETTLEMENTS = 220
+const MIN_SPACING = 4
+const MAX_SPACING = 18
 
 function collectCandidates(
   world: World,
   role: SettlementRole,
   minScore = MIN_ROLE_SCORE,
+  step = 2,
 ): { x: number; y: number; score: number }[] {
   const { width: w, height: h } = world
   const scoreAt = roleScorer(role)
   const out: { x: number; y: number; score: number }[] = []
-  for (let y = 2; y < h - 2; y += 2) {
-    for (let x = 2; x < w - 2; x += 2) {
+  const stride = Math.max(1, step)
+  for (let y = 2; y < h - 2; y += stride) {
+    for (let x = 2; x < w - 2; x += stride) {
       const score = scoreAt(world, x, y)
       if (score < minScore) continue
       const suit = evaluateSuitability(world, x, y)
@@ -225,18 +231,61 @@ function collectCandidates(
   return out
 }
 
-function tooClose(cities: City[], x: number, y: number): boolean {
-  return cities.some((c) => Math.hypot(c.x - x, c.y - y) < SPACING)
+function wrapDist(ax: number, ay: number, bx: number, by: number, w: number): number {
+  const dx = Math.min(Math.abs(ax - bx), w - Math.abs(ax - bx))
+  return Math.hypot(dx, ay - by)
+}
+
+function tooClose(cities: City[], x: number, y: number, w: number, spacing = SPACING): boolean {
+  return cities.some((c) => wrapDist(c.x, c.y, x, y, w) < spacing)
+}
+
+/** Land cells that are not blocked (ocean, cliff, alpine). */
+export function countInhabitableCells(world: World): number {
+  const { elev, seaLevel, suitability } = world
+  let n = 0
+  for (let i = 0; i < elev.length; i++) {
+    if (elev[i] < seaLevel) continue
+    if (suitability[i] <= 0) continue
+    n++
+  }
+  return n
+}
+
+function spacingForTarget(inhabitable: number, target: number): number {
+  if (target <= 0) return MAX_SPACING
+  const raw = 0.9 * Math.sqrt(Math.max(1, inhabitable) / target)
+  return Math.max(MIN_SPACING, Math.min(MAX_SPACING, Math.round(raw)))
+}
+
+/** How many towns 100% coverage would place on this map. */
+export function settlementCapacity(world: World): number {
+  const inhabitable = countInhabitableCells(world)
+  if (!inhabitable) return 0
+  return Math.max(1, Math.min(MAX_SETTLEMENTS, Math.floor(inhabitable / (MIN_SPACING * MIN_SPACING))))
+}
+
+/** Towns to place for a 0..1 coverage of inhabitable land. */
+export function settlementCountForCoverage(world: World, coverage: number): number {
+  const t = Math.max(0, Math.min(1, coverage))
+  if (t <= 0) return 0
+  return Math.max(1, Math.round(t * settlementCapacity(world)))
 }
 
 /** Place settlements for one role. */
-export function suggestSettlementsForRole(world: World, role: SettlementRole, count: number): City[] {
-  const candidates = collectCandidates(world, role)
+export function suggestSettlementsForRole(
+  world: World,
+  role: SettlementRole,
+  count: number,
+  spacing = SPACING,
+): City[] {
+  const step = count > 20 ? 1 : 2
+  const candidates = collectCandidates(world, role, MIN_ROLE_SCORE, step)
   const placed: City[] = []
   const scratch = [...world.cities]
   for (const c of candidates) {
     if (placed.length >= count) break
-    if (tooClose(scratch, c.x, c.y)) continue
+    if (tooClose(scratch, c.x, c.y, world.width, spacing)) continue
     const city: City = {
       x: c.x,
       y: c.y,
@@ -259,7 +308,7 @@ export function suggestSettlementMix(world: World): City[] {
     let added = 0
     for (const c of candidates) {
       if (added >= count) break
-      if (tooClose(scratch, c.x, c.y)) continue
+      if (tooClose(scratch, c.x, c.y, world.width)) continue
       const city: City = {
         x: c.x,
         y: c.y,
@@ -271,6 +320,67 @@ export function suggestSettlementMix(world: World): City[] {
       scratch.push(city)
       added++
     }
+  }
+  return placed
+}
+
+function collectInhabitableSites(world: World): { x: number; y: number; score: number }[] {
+  const { width: w, height: h, elev, seaLevel, suitability } = world
+  const out: { x: number; y: number; score: number }[] = []
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = idx(w, x, y)
+      if (elev[i] < seaLevel || suitability[i] <= 0) continue
+      out.push({ x, y, score: suitability[i] })
+    }
+  }
+  out.sort((a, b) => b.score - a.score)
+  return out
+}
+
+/**
+ * Fill inhabitable land to a coverage fraction (0..1).
+ * 1 = maximal: pack as many towns as the map can hold (capped).
+ * Roles follow geography; mix always tries to found a capital first.
+ */
+export function suggestSettlementsCovering(
+  world: World,
+  plan: SettlementPlan,
+  coverage: number,
+): City[] {
+  const target = settlementCountForCoverage(world, coverage)
+  if (target <= 0) return []
+  const inhabitable = countInhabitableCells(world)
+  const spacing = spacingForTarget(inhabitable, target)
+  if (plan !== 'mix') return suggestSettlementsForRole(world, plan, target, spacing)
+
+  const sites = collectInhabitableSites(world)
+  const placed: City[] = []
+  const scratch = [...world.cities]
+  const w = world.width
+
+  const take = (c: { x: number; y: number; score: number }, role: SettlementRole) => {
+    const city: City = {
+      x: c.x,
+      y: c.y,
+      name: nextCityName({ ...world, cities: scratch } as World),
+      score: c.score,
+      role,
+    }
+    placed.push(city)
+    scratch.push(city)
+  }
+
+  for (const c of collectCandidates(world, 'seat_of_power', 0.18)) {
+    if (tooClose(scratch, c.x, c.y, w, spacing)) continue
+    take(c, 'seat_of_power')
+    break
+  }
+
+  for (const c of sites) {
+    if (placed.length >= target) break
+    if (tooClose(scratch, c.x, c.y, w, spacing)) continue
+    take(c, inferSettlementRole(world, c.x, c.y))
   }
   return placed
 }

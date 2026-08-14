@@ -86,7 +86,9 @@ import {
   resolveCityRole,
   SETTLEMENT_ROLES,
   SETTLEMENT_ROLE_LABEL,
-  suggestSettlements,
+  settlementCapacity,
+  settlementCountForCoverage,
+  suggestSettlementsCovering,
   type SettlementPlan,
 } from './world/settlements'
 import {
@@ -183,6 +185,7 @@ let timelineAge = 0
 let timelineView: World | null = null
 let timelineTimer: number | null = null
 let showTradeRoutes = true
+let settlementCoveragePct = 35
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -206,6 +209,27 @@ function setStatus(msg: string) {
   status = msg
   const el = document.querySelector('#status')
   if (el) el.textContent = status
+}
+
+function updateSettlementDensityHint() {
+  const valEl = document.querySelector('#settlementDensityVal')
+  const hintEl = document.querySelector('#settlementDensityHint')
+  const src = world
+  const pct = settlementCoveragePct
+  const max = src ? settlementCapacity(src) : null
+  const count = src ? settlementCountForCoverage(src, pct / 100) : null
+  if (valEl) {
+    valEl.textContent =
+      max != null && count != null
+        ? `${pct}% · about ${count} town${count === 1 ? '' : 's'} (max ${max})`
+        : `${pct}% · about — towns`
+  }
+  if (hintEl && src && max != null && count != null) {
+    hintEl.textContent =
+      pct >= 95
+        ? `Maximal: fills habitable land with up to ${max} towns. Marginal sites are included at high density.`
+        : `About ${count} of ${max} possible towns on habitable land. Roles follow geography.`
+  }
 }
 
 function showCoach(msg: CoachMessage) {
@@ -271,6 +295,7 @@ function applyWorld(next: World, message: string) {
   updateInspector()
   updateGeoFlags()
   updateCities()
+  updateSettlementDensityHint()
   updateHistoryButtons()
   scheduleAutosave()
 }
@@ -524,6 +549,7 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   renderer.invalidate()
   setClimatePhase('idle')
   updateCities()
+  updateSettlementDensityHint()
   updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
@@ -746,11 +772,24 @@ function renderShell() {
             ${SETTLEMENT_ROLES.map((r) => `<option value="${r}">${SETTLEMENT_ROLE_LABEL[r]}</option>`).join('')}
           </select>
         </label>
+        <label class="slider-row settlement-density-row">
+          How much land to settle
+          <strong id="settlementDensityVal">35% · about — towns</strong>
+          <input
+            id="settlementDensity"
+            type="range"
+            min="5"
+            max="100"
+            step="5"
+            value="${settlementCoveragePct}"
+            aria-label="Settlement density percent of inhabitable land"
+          />
+        </label>
         <div class="action-row">
           <button type="button" id="suggestSettlements">Suggest settlements</button>
           <button type="button" id="clearCities">Clear all</button>
         </div>
-        <p class="hint">Picks seats of power, farmlands, ports, mines, and more from geography. Each town gets a role in the city list.</p>
+        <p class="hint" id="settlementDensityHint">Slide toward 100% to pack most habitable land. Roles follow geography — farms on plains, ports on coasts, mines in highlands.</p>
 
         <h3>Trade routes</h3>
         <label class="trade-route-toggle">
@@ -1051,6 +1090,7 @@ function scheduleClimateRecompute(immediate = false) {
       setClimatePhase('idle')
       updateInspector()
       updateCities()
+  updateSettlementDensityHint()
       scheduleAutosave()
     } catch {
       if (!world) return
@@ -1124,6 +1164,7 @@ function doUndo() {
   refreshGeography(world, { sculpt: false })
   renderer.invalidate()
   updateCities()
+  updateSettlementDensityHint()
   updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
@@ -1148,6 +1189,7 @@ function doRedo() {
   refreshGeography(world, { sculpt: false })
   renderer.invalidate()
   updateCities()
+  updateSettlementDensityHint()
   updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
@@ -1373,6 +1415,7 @@ function bind() {
     reshapeLandmasses(world)
     renderer.invalidate()
     updateCities()
+  updateSettlementDensityHint()
     updateInspector()
     setClimatePhase('painting')
   })
@@ -1454,18 +1497,26 @@ function bind() {
   document.querySelector('#suggestSettlements')!.addEventListener('click', () => {
     if (!world) return
     const plan = (document.querySelector<HTMLSelectElement>('#settlementPlan')?.value ?? 'mix') as SettlementPlan
+    const coverage = settlementCoveragePct / 100
     beginStroke('Suggest settlements', {
       title: 'You asked for suggested settlements',
-      why: 'The app picks towns by role — capitals on good land, farms on plains, ports on coasts, mines in highlands, and so on.',
+      why:
+        coverage >= 0.95
+          ? `The app packs up to ${settlementCountForCoverage(world, coverage)} towns on habitable land, spaced by geography.`
+          : `The app places about ${settlementCountForCoverage(world, coverage)} towns (${settlementCoveragePct}% of habitable land).`,
     })
     strokeActive = false
-    const added = suggestSettlements(world, plan, 5)
+    const added = suggestSettlementsCovering(world, plan, coverage)
     world.cities.push(...added)
     updateCities()
+    updateSettlementDensityHint()
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
-    const roles = added.map((c) => formatSettlementRole(resolveCityRole(c, world!))).join(', ')
+    const roles =
+      added.length <= 8
+        ? added.map((c) => formatSettlementRole(resolveCityRole(c, world!))).join(', ')
+        : `${added.length} towns across the map`
     announceChange(
       added.length
         ? `You added ${added.length} settlement${added.length === 1 ? '' : 's'}`
@@ -1475,8 +1526,12 @@ function bind() {
         : 'No strong sites for that role right now. Heights did not change.',
       added.length
         ? 'Open the city list to see what each town does. Click a name to focus it on the map.'
-        : 'Try another role, or switch to Settle look and improve the land first.',
+        : 'Try another role, raise density, or switch to Settle look and improve the land first.',
     )
+  })
+  document.querySelector<HTMLInputElement>('#settlementDensity')?.addEventListener('input', (e) => {
+    settlementCoveragePct = Number((e.target as HTMLInputElement).value)
+    updateSettlementDensityHint()
   })
   document.querySelector<HTMLInputElement>('#showTradeRoutes')?.addEventListener('change', (e) => {
     showTradeRoutes = (e.target as HTMLInputElement).checked
@@ -1542,6 +1597,7 @@ function bind() {
     world.cities = []
     world.tradeRoutes = []
     updateCities()
+  updateSettlementDensityHint()
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
@@ -1704,6 +1760,7 @@ function bind() {
       strokeActive = false
       const removed = removeNearestCity(world, cell.x, cell.y)
       updateCities()
+  updateSettlementDensityHint()
       updateHistoryButtons()
       renderer.invalidate()
       scheduleAutosave()
@@ -1936,6 +1993,7 @@ function placeContinentAt(x: number, y: number) {
   setMapHint(false)
   renderer.invalidate()
   updateCities()
+  updateSettlementDensityHint()
   updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
@@ -1995,6 +2053,7 @@ async function runDirector() {
     strokeActive = false
     const result = executeDirectorPlan(world, plan)
     updateCities()
+  updateSettlementDensityHint()
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
@@ -2053,6 +2112,7 @@ function tryPlaceCity(x: number, y: number) {
   )
   updateInspector()
   updateCities()
+  updateSettlementDensityHint()
   updateHistoryButtons()
   renderer.invalidate()
   scheduleAutosave()
