@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
+import sys
 import urllib.error
 import urllib.request
 from typing import Any
@@ -172,6 +174,17 @@ def _extract_json(text: str) -> dict[str, Any] | None:
             return None
 
 
+def _urlopen(req: urllib.request.Request, timeout: int = 45):
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        reason = str(getattr(exc, "reason", exc))
+        if "CERTIFICATE_VERIFY_FAILED" in reason:
+            ctx = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        raise
+
+
 def interpret_gemini(prompt: str, context: dict[str, Any], api_key: str) -> dict[str, Any] | None:
     user = f"World context:\n{json.dumps(context, indent=2)}\n\nUser request:\n{prompt}"
     body = json.dumps(
@@ -180,35 +193,55 @@ def interpret_gemini(prompt: str, context: dict[str, Any], api_key: str) -> dict
             "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
         }
     ).encode("utf-8")
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.0-flash:generateContent?key={api_key}"
-    )
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
-        return None
 
-    try:
-        text = payload["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError):
-        return None
+    models = (
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+    )
+    last_err = ""
+    for model in models:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent?key={api_key}"
+        )
+        req = urllib.request.Request(
+            url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _urlopen(req, timeout=45) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            last_err = exc.read().decode("utf-8", errors="replace")[:240]
+            sys.stderr.write(f"[director] Gemini {model} HTTP {exc.code}: {last_err}\n")
+            continue
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            last_err = str(exc)
+            sys.stderr.write(f"[director] Gemini {model} error: {exc}\n")
+            continue
 
-    parsed = _extract_json(text)
-    if not parsed or not isinstance(parsed.get("actions"), list):
-        return None
-    return {
-        "actions": parsed["actions"],
-        "explanation": parsed.get("explanation") or explain_actions(parsed["actions"]),
-        "source": "gemini",
-    }
+        try:
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError, TypeError):
+            last_err = json.dumps(payload)[:240]
+            sys.stderr.write(f"[director] Gemini {model} bad shape: {last_err}\n")
+            continue
+
+        parsed = _extract_json(text)
+        if not parsed or not isinstance(parsed.get("actions"), list):
+            sys.stderr.write(f"[director] Gemini {model} returned non-JSON actions\n")
+            continue
+        return {
+            "actions": parsed["actions"],
+            "explanation": parsed.get("explanation") or explain_actions(parsed["actions"]),
+            "source": "gemini",
+        }
+    if last_err:
+        sys.stderr.write(f"[director] Gemini unavailable, using rules. Last: {last_err}\n")
+    return None
 
 
 def interpret_director(prompt: str, context: dict[str, Any] | None = None) -> dict[str, Any]:

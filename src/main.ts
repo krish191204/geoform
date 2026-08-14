@@ -797,7 +797,7 @@ function renderShell() {
             <textarea id="directorPrompt" rows="3" spellcheck="true" placeholder="Make the east coast wetter and add a mining town in the highlands"></textarea>
           </label>
           <button type="button" id="directorRun">Apply</button>
-          <p class="hint" id="directorStatus">Plain English → raise, rivers, settlements. Works offline; set GEMINI_API_KEY on the API for smarter parsing.</p>
+          <p class="hint" id="directorStatus">Plain English → raise, rivers, settlements. Put GEMINI_API_KEY in .env.local, then npm run dev:api.</p>
         </div>
 
         <h3>Cities</h3>

@@ -8,6 +8,7 @@ Uses the vendored package at vendor/worldengine.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -219,7 +220,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path in ("/", "/health"):
-            self._json(200, {"ok": True, "engine": "worldengine", "version": "0.20.0"})
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "engine": "worldengine",
+                    "version": "0.20.0",
+                    "directorGemini": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+                },
+            )
             return
         self._json(404, {"error": "not found"})
 

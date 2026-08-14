@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:api": "vendor/worldengine/.venv/bin/python server/worldengine_api.py",
+    "dev:api": "bash scripts/dev-api.sh",
     "dev:all": "npm run dev:api & npm run dev",
     "setup:api": "bash scripts/setup-worldengine.sh",
     "build": "tsc && vite build",
