@@ -92,8 +92,7 @@ import {
   type SettlementPlan,
 } from './world/settlements'
 import {
-  atlasRasterScale,
-  displayPixelRatio,
+  atlasRasterScaleForZoom,
   loadMapQuality,
   QUALITY_PRESETS,
   saveMapQuality,
@@ -387,34 +386,42 @@ function resetView() {
   viewPanX = 0
   viewPanY = 0
   planet?.reset()
+  invalidateRenderer()
   applyViewTransform()
 }
 
-/** Size the canvas so the whole grid fits in the map pane (letterbox is UI, not ocean). */
-function fitAtlasCanvas() {
-  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+/** Base CSS size for the atlas at 100% zoom (fits the viewport). */
+function baseAtlasCssSize(): { w: number; h: number } | null {
   const vp = document.querySelector<HTMLElement>('#mapViewport')
   const src = displayWorld() ?? world
-  if (!canvas || !vp || !src) return
+  if (!vp || !src) return null
   const aspect = src.width / Math.max(1, src.height)
   const vw = vp.clientWidth
   const vh = vp.clientHeight
-  if (vw < 2 || vh < 2) return
+  if (vw < 2 || vh < 2) return null
   let w = vw
   let h = w / aspect
   if (h > vh) {
     h = vh
     w = h * aspect
   }
-  canvas.style.width = `${Math.max(1, Math.round(w))}px`
-  canvas.style.height = `${Math.max(1, Math.round(h))}px`
+  return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) }
+}
+
+/** Size the canvas so the whole grid fits in the map pane (letterbox is UI, not ocean). */
+function fitAtlasCanvas() {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  const base = baseAtlasCssSize()
+  if (!canvas || !base) return
+  canvas.style.width = `${Math.round(base.w * viewZoom)}px`
+  canvas.style.height = `${Math.round(base.h * viewZoom)}px`
 }
 
 function applyViewTransform() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
   fitAtlasCanvas()
-  canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px) scale(${viewZoom})`
+  canvas.style.transform = `translate(${viewPanX}px, ${viewPanY}px)`
   const hud = document.querySelector('#hudZoom')
   if (hud) {
     hud.textContent =
@@ -658,6 +665,7 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
     viewZoom = 1
     viewPanX = 0
     viewPanY = 0
+    invalidateRenderer()
     applyViewTransform()
     return
   }
@@ -678,18 +686,23 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
     viewPanX = 0
     viewPanY = 0
   }
+  invalidateRenderer()
   applyViewTransform()
 }
 
 function focusCell(x: number, y: number) {
   hover = { x, y }
-  const canvas = document.querySelector<HTMLCanvasElement>('#map')
-  if (!canvas || !world) return
+  if (!world) return
+  const base = baseAtlasCssSize()
+  if (!base) return
   viewZoom = Math.max(viewZoom, 1.65)
-  const lx = ((x + 0.5) / world.width) * canvas.offsetWidth
-  const ly = ((y + 0.5) / world.height) * canvas.offsetHeight
-  viewPanX = -(lx - canvas.offsetWidth / 2) * viewZoom
-  viewPanY = -(ly - canvas.offsetHeight / 2) * viewZoom
+  const cw = base.w * viewZoom
+  const ch = base.h * viewZoom
+  const lx = ((x + 0.5) / world.width) * cw
+  const ly = ((y + 0.5) / world.height) * ch
+  viewPanX = -(lx - cw / 2)
+  viewPanY = -(ly - ch / 2)
+  invalidateRenderer()
   applyViewTransform()
 }
 
@@ -2292,10 +2305,9 @@ function startLoop() {
   requestRender()
 }
 
-/** Fewer pixels on huge grids so the canvas stays snappy. */
+/** Raster scale grows with zoom so scroll-in stays sharp (not CSS-upscaled blur). */
 function rasterScale(w: World): number {
-  const base = atlasRasterScale(w.width * w.height, mapQuality)
-  return Math.min(8, Math.round(base * displayPixelRatio()))
+  return atlasRasterScaleForZoom(w.width, w.height, mapQuality, viewZoom)
 }
 
 function atlasDrawOpts() {

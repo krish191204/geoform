@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   atlasRasterScale,
+  atlasRasterScaleForZoom,
   defaultMapQuality,
   exportDimensions,
   globeBakeForWorld,
@@ -17,6 +18,14 @@ describe('map quality presets', () => {
   it('atlasRasterScale respects quality on large grids', () => {
     const cells = 512 * 256
     expect(atlasRasterScale(cells, 'hd')).toBeGreaterThanOrEqual(atlasRasterScale(cells, 'draft'))
+  })
+
+  it('atlasRasterScaleForZoom increases with zoom level', () => {
+    const w = 512
+    const h = 256
+    const at100 = atlasRasterScaleForZoom(w, h, 'standard', 1)
+    const at320 = atlasRasterScaleForZoom(w, h, 'standard', 3.2)
+    expect(at320).toBeGreaterThan(at100)
   })
 
   it('globeBakeForWorld caps texture width', () => {

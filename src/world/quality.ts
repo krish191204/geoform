@@ -109,6 +109,21 @@ export function displayPixelRatio(): number {
   return Math.min(2, Math.max(1, window.devicePixelRatio || 1))
 }
 
+/** Cap atlas raster scale so zoom-in stays sharp without blowing memory. */
+export function atlasRasterScaleForZoom(
+  worldWidth: number,
+  worldHeight: number,
+  quality: MapQuality,
+  viewZoom: number,
+): number {
+  const cells = worldWidth * worldHeight
+  const base = atlasRasterScale(cells, quality) * displayPixelRatio()
+  const desired = base * Math.max(1, viewZoom)
+  const maxPixels = 10_000_000
+  const maxScale = Math.sqrt(maxPixels / Math.max(1, cells))
+  return Math.max(2, Math.min(maxScale, Math.round(desired)))
+}
+
 /** Globe bake scale capped so textures stay within preset limits. */
 export function globeBakeForWorld(
   worldWidth: number,
