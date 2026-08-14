@@ -1,0 +1,15 @@
+{
+  "id": "broken-stranded-rivers",
+  "description": "Synthetic: inland streams that never reach water",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [
+    {
+      "kind": "hydro",
+      "titleIncludes": "nowhere"
+    }
+  ],
+  "score": {
+    "max": 95
+  }
+}

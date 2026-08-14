@@ -1,0 +1,17 @@
+{
+  "id": "broken-desert-jungle",
+  "description": "Synthetic: desert glued to jungle with no orographic barrier",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [
+    {
+      "kind": "orography",
+      "titleIncludes": "Desert kisses"
+    }
+  ],
+  "score": {
+    "max": 85
+  },
+  "title": "Desert kisses jungle",
+  "blurb": "Synthetic crime: wet forest glued to arid sand with no range between."
+}

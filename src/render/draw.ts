@@ -107,7 +107,7 @@ function cellColor(
   layer: Layer,
   x: number,
   y: number,
-  showRivers: boolean,
+  riverAmt: number,
   time: number,
 ): [number, number, number] {
   const { width: w, height: h, seaLevel } = world
@@ -182,14 +182,14 @@ function cellColor(
 
   // Rivers — brighter, slightly animated
   if (
-    showRivers &&
+    riverAmt > 0 &&
     layer !== 'plates' &&
     e >= seaLevel &&
     world.flux[i] >= 3.2
   ) {
     const strength = Math.min(1, (world.flux[i] - 3.2) / 10)
     const pulse = 0.85 + 0.15 * Math.sin(time * 3 + x * 0.2 + y * 0.15)
-    const t = (0.45 + strength * 0.4) * pulse
+    const t = (0.45 + strength * 0.4) * pulse * riverAmt
     rgb = mix(rgb, [55, 140, 190], t)
   }
 
@@ -199,6 +199,119 @@ function cellColor(
   rgb = [clamp(rgb[0] * (1 + grain)), clamp(rgb[1] * (1 + grain)), clamp(rgb[2] * (1 + grain))]
 
   return rgb
+}
+
+export type MapLook = Layer | 'satellite' | 'night'
+
+function satelliteColor(world: World, x: number, y: number): [number, number, number] {
+  const { width: w, seaLevel } = world
+  const i = y * w + x
+  const e = world.elev[i]
+  if (e < seaLevel) {
+    const t = e / Math.max(1e-6, seaLevel)
+    if (t < 0.4) return mix([4, 18, 42], [12, 52, 92], t / 0.4)
+    return mix([12, 52, 92], [40, 120, 130], (t - 0.4) / 0.6)
+  }
+  const bio = hexToRgb(biomeColor(world.biome[i]))
+  const rel = elevColor(e, seaLevel)
+  return mix(rel, bio, 0.55)
+}
+
+function nightColor(world: World, x: number, y: number): [number, number, number] {
+  const { width: w, seaLevel } = world
+  const i = y * w + x
+  const e = world.elev[i]
+  let rgb: [number, number, number]
+  if (e < seaLevel) {
+    rgb = mix([6, 12, 28], [14, 28, 52], e / Math.max(1e-6, seaLevel))
+  } else {
+    const t = (e - seaLevel) / Math.max(1e-6, 1 - seaLevel)
+    rgb = mix([22, 28, 38], [48, 52, 62], Math.min(1, t * 1.4))
+  }
+  let lights = 0
+  if (e >= seaLevel) {
+    lights += Math.max(0, world.suitability[i] - 0.55) * 0.9
+    for (const c of world.cities) {
+      const d = Math.hypot(c.x - x, c.y - y)
+      if (d < 3.5) lights = Math.max(lights, 1 - d / 3.5)
+    }
+  }
+  if (lights > 0) rgb = mix(rgb, [255, 210, 140], Math.min(1, lights))
+  return rgb
+}
+
+function lookColor(world: World, look: MapLook, x: number, y: number, time = 0): [number, number, number] {
+  if (look === 'satellite') {
+    let rgb = satelliteColor(world, x, y)
+    const e = world.elev[y * world.width + x]
+    const er = sampleElev(world, Math.min(world.width - 1.001, x + 1), y)
+    const ed = sampleElev(world, x, Math.min(world.height - 1.001, y + 1))
+    const shade = 0.72 + (e - er) * 4.2 + (e - ed) * 3.0
+    const lit = 0.4 + 0.6 * clamp(shade, 0.45, 1.35) / 1.15
+    return [clamp(rgb[0] * lit), clamp(rgb[1] * lit), clamp(rgb[2] * lit)]
+  }
+  if (look === 'night') return nightColor(world, x, y)
+  return cellColor(world, look, x, y, look === 'plates' ? 0 : 1, time)
+}
+
+export function bakeWorldImageData(world: World, look: MapLook, scale = 2): ImageData {
+  const { width: w, height: h } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const [r, g, b] = lookColor(world, look, x, y, 0)
+      const o = (py * cw + px) * 4
+      data[o] = r
+      data[o + 1] = g
+      data[o + 2] = b
+      data[o + 3] = 255
+    }
+  }
+  if (look !== 'night') {
+    for (const c of world.cities) {
+      const cx = Math.round((c.x + 0.5) * scale)
+      const cy = Math.round((c.y + 0.5) * scale)
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const px = cx + dx
+          const py = cy + dy
+          if (px < 0 || py < 0 || px >= cw || py >= ch) continue
+          const o = (py * cw + px) * 4
+          data[o] = 245
+          data[o + 1] = 236
+          data[o + 2] = 214
+        }
+      }
+    }
+  }
+  return image
+}
+
+export function bakeBumpImageData(world: World, scale = 2): ImageData {
+  const { width: w, height: h, elev, seaLevel } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const e = elev[y * w + x]
+      const v = e < seaLevel ? Math.round((e / seaLevel) * 70) : Math.round(90 + ((e - seaLevel) / Math.max(1e-6, 1 - seaLevel)) * 165)
+      const o = (py * cw + px) * 4
+      data[o] = v
+      data[o + 1] = v
+      data[o + 2] = v
+      data[o + 3] = 255
+    }
+  }
+  return image
 }
 
 export interface DrawOptions {
@@ -211,6 +324,8 @@ export interface DrawOptions {
   brush?: number
   tool?: string
   painting?: boolean
+  /** Fade river overlay while climate is stale / recomputing */
+  riversMuted?: boolean
 }
 
 interface WindParticle {
@@ -223,7 +338,7 @@ interface WindParticle {
 function hashWorld(world: World): string {
   const mid = (world.elev.length / 2) | 0
   const q = (world.elev.length / 4) | 0
-  return `${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.cities.length}`
+  return `${world.width}x${world.height}:${world.elev[0]}:${world.elev[mid]}:${world.elev[q]}:${world.moist[mid]}:${world.flux[mid]}:${world.biome[mid]}:${world.plateId[mid]}:${world.cities.length}`
 }
 
 export class MapRenderer {
@@ -261,6 +376,7 @@ export class MapRenderer {
     const { width: w, height: h } = world
     const cw = w * scale
     const ch = h * scale
+    const riverAmt = opts.showRivers ? (opts.riversMuted ? 0.28 : 1) : 0
     const image = new ImageData(cw, ch)
     const data = image.data
 
@@ -275,10 +391,10 @@ export class MapRenderer {
         const x1 = Math.min(w - 1, x0 + 1)
         const fx = xf - x0
 
-        const c00 = cellColor(world, opts.layer, x0, y0, opts.showRivers, time)
-        const c10 = cellColor(world, opts.layer, x1, y0, opts.showRivers, time)
-        const c01 = cellColor(world, opts.layer, x0, y1, opts.showRivers, time)
-        const c11 = cellColor(world, opts.layer, x1, y1, opts.showRivers, time)
+        const c00 = cellColor(world, opts.layer, x0, y0, riverAmt, time)
+        const c10 = cellColor(world, opts.layer, x1, y0, riverAmt, time)
+        const c01 = cellColor(world, opts.layer, x0, y1, riverAmt, time)
+        const c11 = cellColor(world, opts.layer, x1, y1, riverAmt, time)
         const top = mix(c00, c10, fx)
         const bot = mix(c01, c11, fx)
         const [r, g, b] = mix(top, bot, fy)
@@ -319,7 +435,7 @@ export class MapRenderer {
     }
 
     // Rebuild when world/layer changes — not every shimmer tick
-    const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${scale}`
+    const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
     if (key !== this.cacheKey || !this.base) {
       this.rebuildBase(world, opts, 0)
       this.cacheKey = key
@@ -327,8 +443,15 @@ export class MapRenderer {
 
     ctx.putImageData(this.base!, 0, 0)
 
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+
     // Throttled water shimmer (every 3rd frame) — keeps motion without melting the CPU
-    if (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation') {
+    if (
+      !reduceMotion &&
+      (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation')
+    ) {
       this.shimmerFrame++
       if (this.shimmerFrame % 3 === 0 || !this.shimmerBuf) {
         const img = new ImageData(new Uint8ClampedArray(this.base!.data), cw, ch)
@@ -360,7 +483,7 @@ export class MapRenderer {
     }
 
     // Wind streamers (moisture / relief)
-    if (opts.layer === 'moisture' || opts.layer === 'relief') {
+    if (!reduceMotion && (opts.layer === 'moisture' || opts.layer === 'relief')) {
       this.ensureParticles(world.width, world.height)
       ctx.save()
       ctx.globalCompositeOperation = 'lighter'
@@ -386,19 +509,30 @@ export class MapRenderer {
     }
 
     // Brush preview
-    if (opts.hover && (opts.tool === 'raise' || opts.tool === 'lower' || opts.tool === 'city')) {
+    if (
+      opts.hover &&
+      opts.tool &&
+      opts.tool !== 'inspect'
+    ) {
       const { x, y } = opts.hover
       const r = (opts.brush ?? 6) * scale
+      const isCarve = opts.tool === 'lower' || opts.tool === 'channel' || opts.tool === 'sea'
+      const isCity = opts.tool === 'city' || opts.tool === 'razecity'
       ctx.save()
       ctx.beginPath()
-      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, r, 0, Math.PI * 2)
-      ctx.strokeStyle = opts.tool === 'lower' ? 'rgba(180,70,40,0.85)' : 'rgba(243,238,220,0.9)'
-      ctx.lineWidth = opts.painting ? 2.4 : 1.5
-      ctx.setLineDash(opts.tool === 'city' ? [4, 4] : [])
+      ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, isCity ? Math.max(10, r * 0.45) : r, 0, Math.PI * 2)
+      ctx.strokeStyle = isCarve
+        ? 'rgba(180,70,40,0.9)'
+        : opts.tool === 'razecity'
+          ? 'rgba(160,40,40,0.9)'
+          : opts.tool === 'smooth' || opts.tool === 'plateau'
+            ? 'rgba(90,140,160,0.9)'
+            : 'rgba(243,238,220,0.92)'
+      ctx.lineWidth = opts.painting ? 2.5 : 1.6
+      ctx.setLineDash(isCity ? [5, 4] : opts.tool === 'ridge' || opts.tool === 'channel' ? [6, 3] : [])
       ctx.stroke()
-      if (opts.tool !== 'city') {
-        ctx.fillStyle =
-          opts.tool === 'raise' ? 'rgba(243,238,220,0.08)' : 'rgba(180,70,40,0.08)'
+      if (!isCity) {
+        ctx.fillStyle = isCarve ? 'rgba(180,70,40,0.08)' : 'rgba(243,238,220,0.07)'
         ctx.fill()
       }
       ctx.restore()
@@ -435,6 +569,34 @@ export class MapRenderer {
   }
 }
 
+/** Normalize a client point onto a contain-fitted bitmap (object-fit: contain). */
+export function clientToContainedBitmap(
+  clientX: number,
+  clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  bitmapW: number,
+  bitmapH: number,
+): { nx: number; ny: number } | null {
+  if (rect.width < 1 || rect.height < 1 || bitmapW < 1 || bitmapH < 1) return null
+  const boxAspect = rect.width / rect.height
+  const bmpAspect = bitmapW / bitmapH
+  let left = rect.left
+  let top = rect.top
+  let drawW = rect.width
+  let drawH = rect.height
+  if (boxAspect > bmpAspect + 1e-6) {
+    drawW = drawH * bmpAspect
+    left += (rect.width - drawW) / 2
+  } else if (bmpAspect > boxAspect + 1e-6) {
+    drawH = drawW / bmpAspect
+    top += (rect.height - drawH) / 2
+  }
+  const nx = (clientX - left) / drawW
+  const ny = (clientY - top) / drawH
+  if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null
+  return { nx, ny }
+}
+
 export function screenToCell(
   canvas: HTMLCanvasElement,
   clientX: number,
@@ -442,8 +604,10 @@ export function screenToCell(
   world: World,
 ): { x: number; y: number } | null {
   const rect = canvas.getBoundingClientRect()
-  const x = Math.floor(((clientX - rect.left) / rect.width) * world.width)
-  const y = Math.floor(((clientY - rect.top) / rect.height) * world.height)
+  const mapped = clientToContainedBitmap(clientX, clientY, rect, canvas.width, canvas.height)
+  if (!mapped) return null
+  const x = Math.floor(mapped.nx * world.width)
+  const y = Math.floor(mapped.ny * world.height)
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return null
   return { x, y }
 }

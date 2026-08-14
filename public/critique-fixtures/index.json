@@ -1,0 +1,56 @@
+[
+  {
+    "id": "broken-desert-jungle",
+    "title": "Desert kisses jungle",
+    "blurb": "Synthetic crime: wet forest glued to arid sand with no range between.",
+    "corpus": "synthetic"
+  },
+  {
+    "id": "broken-river-ridge",
+    "title": "River over the ridge",
+    "blurb": "Synthetic: a painted channel crests highland spikes.",
+    "corpus": "synthetic"
+  },
+  {
+    "id": "broken-stranded-rivers",
+    "title": "Rivers to nowhere",
+    "blurb": "Synthetic: inland channels that never meet coast or lake.",
+    "corpus": "synthetic"
+  },
+  {
+    "id": "broken-hot-peaks",
+    "title": "Hot mountains",
+    "blurb": "Synthetic: highlands read warm/arid instead of cool alpine.",
+    "corpus": "synthetic"
+  },
+  {
+    "id": "broken-pepper-peaks",
+    "title": "Pepper peaks",
+    "blurb": "Synthetic: isolated pinnacles instead of an orogenic belt.",
+    "corpus": "synthetic"
+  },
+  {
+    "id": "cascades-rain-shadow",
+    "title": "Cascades pattern",
+    "blurb": "Earth-pattern: Pacific → wet forest → N–S crest → dry inland (not a copyrighted basemap).",
+    "corpus": "earth-pattern"
+  },
+  {
+    "id": "andes-rain-shadow",
+    "title": "Andes pattern",
+    "blurb": "Earth-pattern: dry Pacific coast, high crest, greener interior — schematic, self-drawn.",
+    "corpus": "earth-pattern"
+  },
+  {
+    "id": "fantasy-owned-coherent",
+    "title": "Owned coherent fantasy",
+    "blurb": "Self-drawn fantasy continent with windward wet / lee dry and downhill rivers.",
+    "corpus": "fantasy-owned"
+  },
+  {
+    "id": "fantasy-owned-broken",
+    "title": "Owned broken fantasy",
+    "blurb": "Self-drawn fantasy with flipped rain shadow and uphill stream — benchmark only.",
+    "corpus": "fantasy-owned"
+  }
+]

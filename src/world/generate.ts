@@ -1,5 +1,16 @@
-import { createRng, fbm } from './noise'
 import { recomputeDerived } from './climate'
+import { chewStraightCoasts, noisyPolarOcean } from './coasts'
+import { refreshGeography, sculptOrogeny } from './geography'
+import { applyLandRatio, clampLandRatio, DEFAULT_LAND_RATIO } from './land'
+import {
+  clampContinentMass,
+  cohereLand,
+  DEFAULT_CONTINENT_MASS,
+  massRecipe,
+  reshapeLandmasses,
+  type ContinentMass,
+} from './mass'
+import { createRng, fbm } from './noise'
 import type { Biome, City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -10,6 +21,7 @@ interface Plate {
   vx: number
   vy: number
   continental: boolean
+  radius: number
 }
 
 function assignPlates(w: number, h: number, plates: Plate[], seed: number): Int16Array {
@@ -38,14 +50,28 @@ function assignPlates(w: number, h: number, plates: Plate[], seed: number): Int1
   return plateId
 }
 
+function wrapDx(dx: number, w: number): number {
+  if (dx > w / 2) dx -= w
+  if (dx < -w / 2) dx += w
+  return dx
+}
+
 function buildElevation(
   w: number,
   h: number,
   plates: Plate[],
   plateId: Int16Array,
   seed: number,
+  mass: ContinentMass,
 ): Float32Array {
+  const recipe = massRecipe(mass)
   const elev = new Float32Array(w * h)
+  const counts = new Float32Array(plates.length)
+  for (let i = 0; i < plateId.length; i++) counts[plateId[i]]++
+  for (let p = 0; p < plates.length; p++) {
+    const areaR = Math.sqrt(Math.max(1, counts[p]) / Math.PI)
+    plates[p].radius = areaR * (plates[p].continental ? recipe.radiusScale : 0.24)
+  }
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -53,7 +79,25 @@ function buildElevation(
       const p = plates[plateId[i]]
       const n =
         fbm(x / 48, y / 48, seed, 5) * 0.55 + fbm(x / 18, y / 18, seed + 7, 3) * 0.25
-      elev[i] = p.continental ? 0.38 + n * 0.22 : 0.12 + n * 0.12
+      const wx = wrapDx(x - p.x, w) + (fbm(x / 22, y / 18, seed + 19, 4) - 0.5) * 22
+      const wy = y - p.y + (fbm(x / 18, y / 22, seed + 23, 4) - 0.5) * 16
+      const d = Math.hypot(wx, wy * 1.12)
+      const blob = fbm(x / 36, y / 30, seed + 5, 5)
+      const gulfs = fbm(x / 10, y / 9, seed + 41, 4)
+      let t = 1 - d / Math.max(4, p.radius * (0.9 + blob * 0.4))
+      t += (blob - 0.5) * 0.45
+      if (gulfs < recipe.gulfThresh) t -= (recipe.gulfThresh - gulfs) * recipe.gulfCut
+
+      if (p.continental) {
+        const land = Math.max(0, t)
+        elev[i] = 0.14 + n * 0.1 + land * (0.32 + n * 0.14)
+        if (gulfs > 0.8 && t > 0.08) elev[i] += 0.05
+      } else {
+        elev[i] = 0.1 + n * 0.08
+        if (blob > recipe.islandThresh && n > 0.5) {
+          elev[i] = 0.42 + (blob - recipe.islandThresh) * 0.45 + n * 0.08
+        }
+      }
     }
   }
 
@@ -138,6 +182,7 @@ function buildElevation(
   return elev
 }
 
+
 const CITY_NAMES = [
   'Ashmere',
   'Korrin',
@@ -156,39 +201,54 @@ const CITY_NAMES = [
   'Gildenreach',
 ]
 
-export function generateWorld(width: number, height: number, seed: number): World {
+export function generateWorld(
+  width: number,
+  height: number,
+  seed: number,
+  landRatio = DEFAULT_LAND_RATIO,
+  continentMass: ContinentMass = DEFAULT_CONTINENT_MASS,
+): World {
+  const land = clampLandRatio(landRatio)
+  const mass = clampContinentMass(continentMass)
+  const recipe = massRecipe(mass)
   const rng = createRng(seed)
-  const plateCount = 8 + Math.floor(rng() * 6)
+  const plateCount = recipe.plateMin + Math.floor(rng() * recipe.plateSpan)
   const plates: Plate[] = []
+  const wantCont =
+    recipe.contMin + Math.floor(rng() * Math.max(1, recipe.contMax - recipe.contMin + 1))
 
   for (let i = 0; i < plateCount; i++) {
     const ang = rng() * Math.PI * 2
     const speed = 0.35 + rng() * 0.9
+    const slice = (i + 0.5) / Math.max(1, wantCont)
     plates.push({
-      x: rng() * width,
-      y: rng() * height,
+      x: mass === 'continents' && i < wantCont ? (slice + (rng() - 0.5) * 0.18) * width : rng() * width,
+      y: rng() * height * 0.5 + height * 0.25,
       vx: Math.cos(ang) * speed,
       vy: Math.sin(ang) * speed,
-      continental: rng() > 0.42,
+      continental: i < wantCont,
+      radius: 12,
     })
-  }
-  // Ensure at least ~40% continental
-  const cont = plates.filter((p) => p.continental).length
-  if (cont < plateCount * 0.35) {
-    plates[0].continental = true
-    plates[1].continental = true
   }
 
   const plateId = assignPlates(width, height, plates, seed)
-  const elev = buildElevation(width, height, plates, plateId, seed)
+  const elev = buildElevation(width, height, plates, plateId, seed, mass)
 
-  // Coastal fractal: chew continent edges so shores aren't plate-straight
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = idx(width, x, y)
-      const edgeNoise = (fbm(x / 14, y / 14, seed + 41, 4) - 0.5) * 0.08
+      const edgeNoise = (fbm(x / 12, y / 12, seed + 41, 5) - 0.5) * (mass === 'islands' ? 0.12 : 0.07)
       elev[i] = Math.max(0, Math.min(1, elev[i] + edgeNoise))
     }
+  }
+
+  noisyPolarOcean(elev, width, height, seed)
+
+  const plateVx = new Float32Array(plateCount)
+  const plateVy = new Float32Array(plateCount)
+  for (let i = 0; i < plateCount; i++) {
+    plateVx[i] = plates[i].vx * 0.32
+    plateVy[i] = plates[i].vy * 0.32
   }
 
   const seaLevel = 0.44
@@ -198,6 +258,8 @@ export function generateWorld(width: number, height: number, seed: number): Worl
     height,
     seed,
     seaLevel,
+    landRatio: land,
+    continentMass: mass,
     plateId,
     elev,
     temp: new Float32Array(width * height),
@@ -207,13 +269,28 @@ export function generateWorld(width: number, height: number, seed: number): Worl
     suitability: new Float32Array(width * height),
     cities: [] as City[],
     plateCount,
+    plateVx,
+    plateVy,
     rawElevMin: 0,
     rawElevMax: 1,
     rawSeaThreshold: seaLevel,
     engine: 'local',
+    originX: 0,
+    originY: 0,
+    latRows: height,
   }
 
-  recomputeDerived(world)
+  applyLandRatio(world, land)
+  reshapeLandmasses(world)
+  cohereLand(world.elev, width, height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
+  for (let p = 0; p < recipe.chewPasses; p++) {
+    chewStraightCoasts(world.elev, width, height, world.seaLevel, seed + p * 9)
+  }
+  sculptOrogeny(world)
+  if (recipe.speckleMax > 0) {
+    cohereLand(world.elev, width, height, world.seaLevel, Math.max(4, recipe.speckleMax - 6), 6)
+  }
+  refreshGeography(world, { sculpt: false })
   return world
 }
 

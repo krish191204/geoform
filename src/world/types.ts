@@ -7,7 +7,19 @@ export type Layer =
   | 'biome'
   | 'suitability'
 
-export type Tool = 'raise' | 'lower' | 'city' | 'inspect'
+export type Tool =
+  | 'raise'
+  | 'lower'
+  | 'smooth'
+  | 'ridge'
+  | 'channel'
+  | 'plateau'
+  | 'sea'
+  | 'land'
+  | 'city'
+  | 'razecity'
+  | 'inspect'
+  | 'continent'
 
 /** WorldEngine Holdridge names + a few UI aliases */
 export type Biome = string
@@ -30,6 +42,10 @@ export interface World {
   height: number
   seed: number
   seaLevel: number
+  /** Target share of cells that should be land (the rest is water). */
+  landRatio: number
+  /** How land should clump: full continents, mixed, or speckle islands. */
+  continentMass: 'continents' | 'mixed' | 'islands'
   plateId: Int16Array
   elev: Float32Array
   temp: Float32Array
@@ -39,11 +55,19 @@ export interface World {
   suitability: Float32Array
   cities: City[]
   plateCount: number
+  /** Plate velocity in cells per million years. */
+  plateVx: Float32Array
+  plateVy: Float32Array
   /** WorldEngine raw elevation calibration (for recompute) */
   rawElevMin: number
   rawElevMax: number
   rawSeaThreshold: number
   engine: 'worldengine' | 'local'
+  /** World-space origin of cell (0,0); shifts when the map expands. */
+  originX: number
+  originY: number
+  /** Row count used for latitude 0..1; frozen at generate so expand does not restyle land. */
+  latRows: number
 }
 
 const FALLBACK_BIOME = '#6e7f6a'

@@ -1,0 +1,10 @@
+{
+  "id": "broken-hot-peaks",
+  "description": "Synthetic: warm-colored highlands (lapse-looking wrong in paint)",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [],
+  "score": {
+    "max": 100
+  }
+}

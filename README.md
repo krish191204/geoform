@@ -1,6 +1,15 @@
 # Geoform — technical documentation
 
-Geoform is a browser-based worldbuilding UI that uses **Mindwerks WorldEngine** as the geography backend. The UI edits a heightfield; WorldEngine recomputes climate, hydrology, and biomes. Settlement placement is a separate heuristic scored in the client.
+Geoform is a browser worldbuilding app. Paint a heightfield; climate, rivers, and biomes follow; cities sit where land can support them. Default engine: **Local (browser)**. Typical world: **320×160**.
+
+Pages:
+
+- Map editor `/` — paint, Full continents vs islands, silent geography repair
+- Labs `/labs.html` — one rule at a time (including continent clumping)
+- Critique `/critique.html` — grade fixtures and Geoform JSON
+- Roadmap `/roadmap.html` — T0 shipped, T1 Earth calibration next
+
+Optional Mindwerks WorldEngine backend remains available as **WorldEngine API**.
 
 ---
 
@@ -30,6 +39,14 @@ There is **no database**. Runtime state is in-memory typed arrays. Persistence i
 ## Setup / run
 
 ```bash
+npm run setup:api          # clones vendor/worldengine + creates .venv (gitignored)
+npm run dev:api            # terminal 1 → :8765
+npm run dev                # terminal 2 → http://127.0.0.1:5173
+```
+
+Or manually:
+
+```bash
 cd vendor/worldengine && python3 -m venv .venv && source .venv/bin/activate
 pip install -e .          # worldengine + PyPlatec, numpy, noise, protobuf, …
 cd ../.. && npm install
@@ -38,7 +55,9 @@ npm run dev:api           # terminal 1
 npm run dev               # terminal 2 → http://127.0.0.1:5173
 ```
 
-Default generation size from the UI: **320 × 160** cells, **10 plates**. Full plate sim is O(seconds); climate-only recompute is ~1s at that resolution.
+**If the map is blank / “Bad Gateway”:** an old build expected WorldEngine. Current default is **Local (browser)** — just `npm run dev` and hit New world. Optional: `npm run setup:api && npm run dev:api` for WorldEngine.
+
+There is **no cloud account / cloud sync** for worlds. Autosave is `localStorage` in the current browser only; use Export/Import JSON to move maps between machines.
 
 ---
 
@@ -58,7 +77,7 @@ All spatial fields are length `width * height`, row-major (`i = y * width + x`).
 | `cities` | `{x,y,name,score}[]` | Placed settlements |
 | `rawElevMin/Max`, `rawSeaThreshold` | `number` | WorldEngine native elevation calibration for round-trip recompute |
 
-`engine: 'worldengine' | 'local'` marks provenance. Live path is always `worldengine` after generate/recompute.
+`engine: 'worldengine' | 'local'` marks provenance. Default new worlds are `local`. WorldEngine is opt-in.
 
 ---
 
@@ -128,7 +147,7 @@ Radial falloff brush adds/subtracts from `elev` (clamped \[0,1\]).
 
 Then **local** `recomputeDerived(world, includeSuitability=false)` in `climate.ts` (fast TS climate/hydro/biome) for immediate preview.
 
-Debounced (~650ms) **`recomputeWorldEngine(world)`** replaces arrays with authoritative WorldEngine output and keeps `cities`.
+Debounced **`refreshGeography` / `harmonizeWorld`** repairs mix, coasts, speckles, drainage, and climate in the browser. WorldEngine recompute is only used when that engine is selected.
 
 ### Settlement (`evaluateSuitability`)
 
@@ -237,9 +256,23 @@ vendor/worldengine/         Upstream Mindwerks WorldEngine (editable install)
 | Full suitability map | tens of ms | 320×160 × neighborhood queries |
 | Base raster rebuild | tens of ms | bilinear + hillshade CPU |
 
-Authoritative climate after sculpt always goes through the Python process; the TS climate path is preview-only and gets overwritten.
+Authoritative climate after sculpt is the local TS path (`harmonizeWorld`) unless WorldEngine is selected.
 
 ---
+
+## Accuracy roadmap (Earth-grounded next stage)
+
+Full requirements (datasets, math, skills, storage, phases):
+
+- Immersive interactive page: [http://127.0.0.1:5173/roadmap.html](http://127.0.0.1:5173/roadmap.html) (also linked from the map editor)
+- Geography labs (elevation, rivers, rain shadow, tectonics, settlement): [http://127.0.0.1:5173/labs.html](http://127.0.0.1:5173/labs.html)
+- Map critique (upload a map image, get a geography roast): [http://127.0.0.1:5173/critique.html](http://127.0.0.1:5173/critique.html)
+- Training / test corpus policy: [`docs/TRAINING_AND_TESTS.md`](docs/TRAINING_AND_TESTS.md)
+- Report: [`docs/ACCURACY_ROADMAP.md`](docs/ACCURACY_ROADMAP.md)
+
+Critique regression: `npm run fixtures:critique && npm test`
+
+Tooling references cloned locally under `vendor-skills/` (gitignored): shadcn-ui MCP, anthropics/skills, ui-ux-pro-max, Convex agent-skills.
 
 ## What is explicitly not in the stack
 

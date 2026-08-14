@@ -1,0 +1,16 @@
+{
+  "id": "broken-river-ridge",
+  "description": "Synthetic: river stroke cresting bright ridge peaks",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [
+    {
+      "kind": "hydro"
+    }
+  ],
+  "score": {
+    "max": 90
+  },
+  "title": "River over the ridge",
+  "blurb": "Synthetic: a painted channel crests highland spikes."
+}

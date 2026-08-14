@@ -1,0 +1,73 @@
+# Geoform Earth data catalog (Track A)
+
+version: 1
+updated: 2026-08-12
+policy: docs/TRAINING_AND_TESTS.md
+
+aois:
+  - id: cascades-rain-shadow
+    name: Cascades rain-shadow strip
+    priority: P0
+    description: >
+      Pacific → wet windward forests → N–S Cascades crest → dry Columbia interior.
+      Classic orographic calibration target for T1.
+    crs_work: EPSG:4326
+    bbox:
+      west: -125.0
+      south: 43.5
+      east: -118.0
+      north: 49.0
+    success_metrics:
+      - name: orographic_sign
+        detail: Fitted lee residual negative east of crest under westerlies
+      - name: spatial_block_r2
+        detail: Hold-out spatial blocks (not random pixels) for precip fit
+      - name: ui_ridge_test
+        detail: Raise ridge in Geoform → lee moisture drops in calibrated regime
+
+datasets:
+  - id: dem-copernicus-glo90
+    aoi: cascades-rain-shadow
+    domain: elevation
+    product: Copernicus DEM GLO-90
+    priority: P0
+    status: planned
+    path_raw: data/raw/cascades-rain-shadow/dem/
+    notes: Clip to AOI bbox; write COG to data/staging/; store checksum in catalog after download.
+
+  - id: worldclim-2-1-precip-temp
+    aoi: cascades-rain-shadow
+    domain: climate
+    product: WorldClim 2.1 monthly normals (precip, tavg)
+    priority: P0
+    status: planned
+    path_raw: data/raw/cascades-rain-shadow/worldclim/
+    notes: Same AOI clip; use for P0 baseline + rain-shadow residual labels.
+
+  - id: era5-wind-climatology
+    aoi: cascades-rain-shadow
+    domain: wind
+    product: ERA5 / ERA5-Land prevailing wind
+    priority: P0
+    status: planned
+    path_raw: data/raw/cascades-rain-shadow/era5/
+    notes: Needed for windward/leeward definition in orographic model.
+
+  - id: hydrosheds-rivers
+    aoi: cascades-rain-shadow
+    domain: hydro
+    product: HydroSHEDS / MERIT Hydro
+    priority: P0
+    status: planned
+    path_raw: data/raw/cascades-rain-shadow/hydro/
+    notes: Validate flow accumulation against real networks.
+
+storage:
+  planes:
+    A_raw: data/raw/
+    B_derived: data/derived/
+    C_product: user worlds (Convex / export) — not this folder
+  rules:
+    - Never overwrite raw downloads; version by checksum.
+    - Derived layers must be rebuildable from raw + code.
+    - Fantasy map PNGs are Track B only (tests/critique/fixtures).

@@ -1,0 +1,12 @@
+{
+  "id": "broken-hot-peaks",
+  "description": "Synthetic: warm-colored highlands (lapse-looking wrong in paint)",
+  "corpus": "synthetic",
+  "mode": "painted",
+  "mustFind": [],
+  "score": {
+    "max": 100
+  },
+  "title": "Hot mountains",
+  "blurb": "Synthetic: highlands read warm/arid instead of cool alpine."
+}
