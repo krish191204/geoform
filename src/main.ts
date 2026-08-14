@@ -198,6 +198,8 @@ const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
 let loopActive = false
+/** Set when paint is requested while a frame is already scheduled. */
+let renderQueued = false
 let inspectorTimer: number | null = null
 
 async function ensurePlanetView(): Promise<PlanetView | null> {
@@ -247,7 +249,10 @@ function wantsContinuousAnimation(): boolean {
 }
 
 function requestRender() {
-  if (loopActive) return
+  if (loopActive) {
+    renderQueued = true
+    return
+  }
   loopActive = true
   raf = requestAnimationFrame(tick)
 }
@@ -257,9 +262,17 @@ function invalidateRenderer() {
   requestRender()
 }
 
+/** Repaint without dropping the cached bitmap (e.g. preview → full quality upgrade). */
+function requestRepaint() {
+  requestRender()
+}
+
 function tick() {
   paint()
   if (wantsContinuousAnimation()) {
+    raf = requestAnimationFrame(tick)
+  } else if (renderQueued) {
+    renderQueued = false
     raf = requestAnimationFrame(tick)
   } else {
     loopActive = false
@@ -2355,11 +2368,13 @@ function atlasDrawOpts(preview = mapPaintPreview) {
 
 function finishAtlasPaint() {
   if (!mapPaintPending) return
+  if (mapPaintPreview) {
+    mapPaintPreview = false
+    requestRepaint()
+    return
+  }
   mapPaintPending = false
   setBusy(false)
-  const upgrade = mapPaintPreview
-  mapPaintPreview = false
-  if (upgrade) invalidateRenderer()
 }
 
 /** Draw the current world onto the canvas when a frame is requested. */
