@@ -14,6 +14,8 @@ export interface CoachMessage {
   tip: string
   next: string
   tone?: CoachTone
+  /** Knock-on effects after an edit. Shown as “What else changed”. */
+  changed?: string[]
 }
 
 const TOOL_COACH: Record<Tool, CoachMessage> = {
@@ -261,10 +263,18 @@ export function paintCoach(el: HTMLElement | null, msg: CoachMessage): void {
   const tone = msg.tone ?? 'tip'
   el.dataset.tone = tone
   el.hidden = false
+  const changed =
+    msg.changed?.length ?
+      `<div class="coach-changed">
+        <p class="coach-changed-label">What else changed</p>
+        <ul>${msg.changed.map((c) => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
+      </div>`
+    : ''
   el.innerHTML = `
     <p class="coach-kicker">${toneLabel(tone)}</p>
     <strong class="coach-title">${escapeHtml(msg.title)}</strong>
     <p class="coach-tip">${escapeHtml(msg.tip)}</p>
+    ${changed}
     <p class="coach-next"><span>Try next</span> ${escapeHtml(msg.next)}</p>
   `
 }
@@ -272,7 +282,7 @@ export function paintCoach(el: HTMLElement | null, msg: CoachMessage): void {
 function toneLabel(tone: CoachTone): string {
   if (tone === 'go') return 'Do this'
   if (tone === 'warn') return 'Watch out'
-  if (tone === 'ok') return 'Looking good'
+  if (tone === 'ok') return 'What just happened'
   return 'Suggestion'
 }
 

@@ -29,6 +29,13 @@ import {
   type CoachMessage,
 } from './chrome/coach'
 import {
+  AFTER_EDIT_NEXT,
+  coachAfterChange,
+  snapshotWorld,
+  strokeCopy,
+  type WorldSnapshot,
+} from './chrome/mapChange'
+import {
   clearTutorialDone,
   isTutorialBlocking,
   isTutorialDone,
@@ -121,6 +128,10 @@ let strength = 0.09
 let softness = 0.7
 let painting = false
 let strokeActive = false
+/** Map stats before the current edit — used to say what else changed. */
+let changeBefore: WorldSnapshot | null = null
+let changeTitle = ''
+let changeWhy = ''
 let hover: { x: number; y: number } | null = null
 let lastCell: { x: number; y: number } | null = null
 let status = 'Loading…'
@@ -171,11 +182,36 @@ function setStatus(msg: string) {
 
 function showCoach(msg: CoachMessage) {
   paintCoach(document.querySelector('#coach'), msg)
-  setStatus(`${msg.title}: ${msg.tip}`)
+  const extra = msg.changed?.[0] ? ` ${msg.changed[0]}` : ''
+  setStatus(`${msg.title}: ${msg.tip}${extra}`)
+}
+
+function rememberMap(title: string, why: string) {
+  if (!world) return
+  changeBefore = snapshotWorld(world)
+  changeTitle = title
+  changeWhy = why
+}
+
+function announceChange(title?: string, why?: string, next = AFTER_EDIT_NEXT) {
+  if (!world) return
+  showCoach(
+    coachAfterChange(
+      title ?? changeTitle ?? 'The map updated',
+      why ?? changeWhy ?? 'Height changed, so climate and rivers followed.',
+      changeBefore,
+      world,
+      next,
+    ),
+  )
+  changeBefore = null
+  changeTitle = ''
+  changeWhy = ''
 }
 
 /** Swap in a new planet (New world, Load, undo). Reset the deep-time slider to Present. */
 function applyWorld(next: World, message: string) {
+  changeBefore = null
   world = next
   seed = next.seed
   landRatio = next.landRatio
@@ -198,13 +234,11 @@ function applyWorld(next: World, message: string) {
     refreshGeography(next, { sculpt: false })
   }
   renderer.invalidate()
-  setStatus(message)
-  showCoach({
-    title: 'World loaded',
-    tip: message,
-    next: 'Pick Raise or Ridge and drag on land. Watch rivers after you release.',
-    tone: 'ok',
-  })
+  announceChange(
+    'A new planet is on the map',
+    `${message} This replaced the previous world. Rivers and plants were calculated from the new heights — they were not drawn by hand.`,
+    'Pick Raise or Ridge and drag on green/brown land. After you release, this box will say what else changed.',
+  )
   setClimatePhase('idle')
   updateInspector()
   updateGeoFlags()
@@ -465,7 +499,11 @@ function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
-  setStatus(`Atlas grew to ${world.width}×${world.height}`)
+  announceChange(
+    `The atlas grew to ${world.width}×${world.height} cells`,
+    'Zooming out added real ocean/land around the old map. Same planet, bigger sheet — not a camera trick.',
+    'You can keep painting. Scroll out again to grow more, until the size cap.',
+  )
   return true
 }
 
@@ -916,24 +954,23 @@ function scheduleClimateRecompute(immediate = false) {
       if (timelineAge > 0.5) timelineView = reconstructPast(world, timelineAge)
       renderer.invalidate()
       scheduleAutosave()
-      setStatus('Rivers and climate rebuilt from the land.')
+      announceChange()
       setClimatePhase('idle')
       updateInspector()
       updateGeoFlags()
       return
     }
-    setStatus('Asking Python for climate…')
+    setStatus('Rebuilding rain and rivers from your new heights…')
     setClimatePhase('updating')
     try {
       const next = await recomputeWorldEngine(world)
       if (gen !== recomputeGeneration) return
-      // preserve history by mutating fields instead of applyWorld wipe
       world = next
       ensurePlateMotion(world)
       ensureVisibleHydrology(world)
       recomputeSuitability(world)
       renderer.invalidate()
-      setStatus('Python climate updated.')
+      announceChange()
       setClimatePhase('idle')
       updateInspector()
       updateCities()
@@ -942,7 +979,10 @@ function scheduleClimateRecompute(immediate = false) {
       if (!world) return
       recomputeDerived(world)
       renderer.invalidate()
-      setStatus('Used local climate after Python failure.')
+      announceChange(
+        changeTitle || 'Climate rebuilt in the browser',
+        'Python science failed, so the browser rebuilt rain and rivers from your heights instead.',
+      )
       setClimatePhase('idle')
       updateInspector()
     }
@@ -952,8 +992,14 @@ function scheduleClimateRecompute(immediate = false) {
 }
 
 /** Snapshot undo BEFORE the stroke. One undo undoes the whole drag, not each pixel. */
-function beginStroke(label: string) {
+function beginStroke(label: string, explain?: { title: string; why: string }) {
   if (!world || strokeActive) return
+  const copy =
+    explain ??
+    (TERRAIN_TOOLS.includes(tool)
+      ? strokeCopy(tool)
+      : { title: label, why: `${label}. That is what you just did on the map.` })
+  rememberMap(copy.title, copy.why)
   history.push(world, label)
   strokeActive = true
   updateHistoryButtons()
@@ -971,6 +1017,12 @@ function endStroke() {
   }
   tutorialNotifyStrokeEnd()
   setClimatePhase('updating')
+  showCoach({
+    title: changeTitle || 'Updating the weather',
+    tip: 'You finished a stroke. Rain, rivers, and plants are catching up from the new heights — that is automatic, not a second paint.',
+    next: 'Wait a moment. This box will list what else changed.',
+    tone: 'tip',
+  })
   scheduleClimateRecompute(true)
 }
 
@@ -983,6 +1035,7 @@ function updateHistoryButtons() {
 
 function doUndo() {
   if (!world || !history.canUndo()) return
+  rememberMap('You undid the last stroke', 'The map is back to how it was before that action. Climate and rivers match the restored heights.')
   const label = history.undo(world)
   timelineAge = 0
   timelineView = null
@@ -998,11 +1051,15 @@ function doUndo() {
   updateHistoryButtons()
   scheduleAutosave()
   setClimatePhase('idle')
-  setStatus(label ? `Undo: ${label}` : 'Undo')
+  announceChange(
+    label ? `You undid “${label}”` : 'You undid the last change',
+    'That action is gone. Everything below is the map as it was before it.',
+  )
 }
 
 function doRedo() {
   if (!world || !history.canRedo()) return
+  rememberMap('You redid the last stroke', 'The undone action is back. Climate and rivers match those heights again.')
   const label = history.redo(world)
   timelineAge = 0
   timelineView = null
@@ -1018,7 +1075,10 @@ function doRedo() {
   updateHistoryButtons()
   scheduleAutosave()
   setClimatePhase('idle')
-  setStatus(label ? `Redo: ${label}` : 'Redo')
+  announceChange(
+    label ? `You redid “${label}”` : 'You redid the last change',
+    'That action is on the map again.',
+  )
 }
 
 function setTool(next: Tool) {
@@ -1232,7 +1292,11 @@ function bind() {
     document.querySelector('#waterVal')!.textContent = String(Math.round((1 - landRatio) * 100))
     showCoach(coachLandRatio(Math.round(landRatio * 100)))
     if (!world || busy) return
-    if (!strokeActive) beginStroke('Land / water')
+    if (!strokeActive)
+      beginStroke('Land / water', {
+        title: 'You moved the water line',
+        why: 'The Land % slider floods or exposes existing coasts. It does not sprinkle random islands. Climate rebuilds when you release the slider.',
+      })
     applyLandRatio(world, landRatio)
     reshapeLandmasses(world)
     renderer.invalidate()
@@ -1243,7 +1307,6 @@ function bind() {
   landInput?.addEventListener('change', () => {
     if (!world) return
     endStroke()
-    showCoach(coachLandRatio(Math.round(landRatio * 100)))
   })
 
   const timeInput = document.querySelector<HTMLInputElement>('#timeline')
@@ -1258,14 +1321,22 @@ function bind() {
   document.querySelector('#redo')!.addEventListener('click', doRedo)
   document.querySelector('#resetView')!.addEventListener('click', () => {
     resetView()
-    setStatus('View reset')
+    showCoach({
+      title: 'View reset',
+      tip: 'The camera went back to 100% — the planet itself did not change.',
+      next: 'Scroll to zoom, Space+drag to pan.',
+      tone: 'ok',
+    })
   })
   document.querySelector('#recomputeNow')!.addEventListener('click', () => {
     if (!world) return
     if (timelineAge > 0.5) setTimelineAge(0)
+    rememberMap(
+      'You refreshed climate',
+      'Heights were kept. Rain, rivers, and plants were rebuilt from those heights. On Local this can also raise plate-edge mountains.',
+    )
     setClimatePhase('updating')
     if (world.engine === 'worldengine' && engineChoice === 'worldengine') {
-      // Keep plate mountains from Python; refresh climate without Local reshape.
       void (async () => {
         try {
           if (await apiHealthy()) {
@@ -1273,29 +1344,23 @@ function bind() {
             ensurePlateMotion(world)
             ensureVisibleHydrology(world)
             recomputeSuitability(world)
-            showCoach({
-              title: 'Climate refreshed',
-              tip: 'Python rebuilt rain and rivers. Your painted heights were kept.',
-              next: 'Check Relief for blue streams, or Biome for plant belts.',
-              tone: 'ok',
-            })
+            announceChange(
+              'You refreshed climate (Python)',
+              'Painted heights were kept. Python rebuilt rain and rivers. Blue on Relief is streams, not decoration.',
+            )
           } else {
             recomputeDerived(world!)
-            showCoach({
-              title: 'Local climate',
-              tip: 'Python API offline — rebuilt rivers in the browser from current heights.',
-              next: 'Start npm run dev:api if you want Python science again.',
-              tone: 'warn',
-            })
+            announceChange(
+              'You refreshed climate in the browser',
+              'Python was offline, so rain and rivers rebuilt locally from current heights.',
+            )
           }
         } catch {
           recomputeDerived(world!)
-          showCoach({
-            title: 'Local climate fallback',
-            tip: 'Python refresh failed — used browser climate instead.',
-            next: 'Check that the API is running on :8765.',
-            tone: 'warn',
-          })
+          announceChange(
+            'You refreshed climate in the browser',
+            'Python refresh failed. The browser rebuilt rain and rivers from current heights.',
+          )
         }
         renderer.invalidate()
         setClimatePhase('idle')
@@ -1307,18 +1372,19 @@ function bind() {
     refreshGeography(world, { sculpt: true })
     renderer.invalidate()
     setClimatePhase('idle')
-    showCoach({
-      title: 'Mountains & climate rebuilt',
-      tip: 'Plate-edge ranges and inland uplands refreshed, then rivers from the new heights.',
-      next: 'Switch to Relief — you should see ridges and blue streams.',
-      tone: 'ok',
-    })
+    announceChange(
+      'You rebuilt mountains and climate',
+      'Plate-edge ranges and inland uplands were sculpted, then rivers and plants followed the new heights.',
+    )
     updateInspector()
     scheduleAutosave()
   })
   document.querySelector('#suggestCities')!.addEventListener('click', () => {
     if (!world) return
-    beginStroke('Suggest cities')
+    beginStroke('Suggest cities', {
+      title: 'You asked for suggested cities',
+      why: 'The app places cities only on decent land (coast, rivers, gentle slopes) — not on ocean or peaks.',
+    })
     strokeActive = false
     const added = suggestCities(world, 5)
     world.cities.push(...added)
@@ -1326,32 +1392,29 @@ function bind() {
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
-    showCoach(
+    announceChange(
+      added.length ? `You added ${added.length} suggested ${added.length === 1 ? 'city' : 'cities'}` : 'No cities were added',
       added.length
-        ? {
-            title: `Suggested ${added.length} cities`,
-            tip: 'Dropped on high-suitability cells near coast or rivers.',
-            next: 'Open Settle layer to see the green sites, or Found city yourself.',
-            tone: 'ok',
-          }
-        : {
-            title: 'No strong sites',
-            tip: 'Land may be too harsh, dry, or steep right now.',
-            next: 'Switch to Settle layer, or Land/Raise gentler coasts, then try again.',
-            tone: 'warn',
-          },
+        ? 'They sit on high-suitability cells. Heights, rivers, and climate did not change — only dots on the map.'
+        : 'No strong sites right now. Heights did not change.',
+      added.length
+        ? 'Open the Settle look (green = good). Click a name in the city list to zoom.'
+        : 'Switch to Settle look, raise gentler coasts, then try again.',
     )
   })
   document.querySelector('#clearCities')!.addEventListener('click', () => {
     if (!world?.cities.length) return
-    beginStroke('Clear cities')
+    beginStroke('Clear cities', {
+      title: 'You cleared every city',
+      why: 'Only the city dots are gone. Land, rivers, and climate are unchanged.',
+    })
     strokeActive = false
     world.cities = []
     updateCities()
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
-    setStatus('Cities cleared')
+    announceChange()
   })
 
   document.querySelector('#regen')!.addEventListener('click', () => {
@@ -1374,6 +1437,12 @@ function bind() {
     if (!world) return
     downloadWorld(world)
     setStatus(`Exported geoform-seed-${world.seed}.json`)
+    showCoach({
+      title: 'You exported a file',
+      tip: `Downloaded geoform-seed-${world.seed}.json. That is a copy of this planet — the map on screen did not change.`,
+      next: 'Keep editing, or Import JSON later to load it back.',
+      tone: 'ok',
+    })
   })
   const importFile = document.querySelector<HTMLInputElement>('#importFile')!
   document.querySelector('#import')!.addEventListener('click', () => {
@@ -1498,23 +1567,30 @@ function bind() {
     if (tool === 'razecity') {
       const past = gatePresentEdit(timelineAge)
       if (past) {
-        setStatus(`${past.title}: ${past.detail}`)
+        showCoach({ title: `Blocked: ${past.title}`, tip: past.detail, next: 'Set Age back to Present to edit.', tone: 'warn' })
         return
       }
       const gate = gateRazeCity(world, cell.x, cell.y)
       if (!gate.ok) {
-        setStatus(`${gate.title}: ${gate.detail}`)
+        showCoach({ title: `Blocked: ${gate.title}`, tip: gate.detail, next: 'Click closer to a city dot.', tone: 'warn' })
         updateInspector()
         return
       }
-      beginStroke('Raze city')
+      beginStroke('Raze city', {
+        title: 'You razed a city',
+        why: 'Only that settlement is gone. Land, rivers, and climate did not change.',
+      })
       strokeActive = false
       const removed = removeNearestCity(world, cell.x, cell.y)
       updateCities()
       updateHistoryButtons()
       renderer.invalidate()
       scheduleAutosave()
-      setStatus(removed ? `Razed ${removed.name}` : 'No city nearby')
+      if (removed) {
+        announceChange(`You razed ${removed.name}`, 'The city marker is gone. The land is the same.')
+      } else {
+        announceChange('No city was razed', 'Nothing was close enough to the click. The map is unchanged.')
+      }
       return
     }
 
@@ -1569,7 +1645,9 @@ function bind() {
     lastCell = cell
     renderer.invalidate()
     scheduleAutosave()
-    setStatus(`${TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit'} — climate will refresh when you release`)
+    setStatus(
+      `${TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit'} — still dragging. Rain and rivers update when you release, not mid-stroke.`,
+    )
     updateInspector()
   }
 
@@ -1702,23 +1780,36 @@ function placeContinentAt(x: number, y: number) {
   if (!world || busy) return
   const past = gatePresentEdit(timelineAge)
   if (past) {
-    setStatus(`${past.title}: ${past.detail}`)
+    showCoach({ title: `Blocked: ${past.title}`, tip: past.detail, next: 'Set Age back to Present to add land.', tone: 'warn' })
     return
   }
   const gate = gateContinentPlacement(world, x, y, continentStyle)
   if (!gate.ok) {
-    setStatus(`${gate.title}: ${gate.detail}`)
+    showCoach({
+      title: `Blocked: ${gate.title}`,
+      tip: gate.detail,
+      next: 'Click deep ocean, or Auto-place. Continents cannot stamp on existing land.',
+      tone: 'warn',
+    })
     updateInspector()
     return
   }
   const style = CONTINENT_STYLES.find((s) => s.id === continentStyle)
-  beginStroke(style ? `Add ${style.label.toLowerCase()}` : 'Add continent')
+  beginStroke(style ? `Add ${style.label.toLowerCase()}` : 'Add continent', {
+    title: `You added a ${style?.label.toLowerCase() ?? 'continent'}`,
+    why: 'New land appeared in the ocean. Neighboring coasts and plates updated. Rain and rivers will rebuild from the new heights.',
+  })
   strokeActive = false
   const result = addContinent(world, x, y, continentStyle, continentRadius())
   if (!result.ok) {
     history.cancelLast()
     updateHistoryButtons()
-    setStatus(result.message)
+    showCoach({
+      title: 'Continent was not added',
+      tip: result.message,
+      next: 'Click open ocean (not land), or Auto-place.',
+      tone: 'warn',
+    })
     return
   }
   setMapHint(false)
@@ -1729,14 +1820,18 @@ function placeContinentAt(x: number, y: number) {
   scheduleAutosave()
   setClimatePhase('updating')
   scheduleClimateRecompute(true)
-  setStatus(result.message)
 }
 
 function placeContinentAuto() {
   if (!world || busy) return
   const site = findOceanSite(world, continentStyle)
   if (!site) {
-    setStatus('No open ocean large enough — lower some land first.')
+    showCoach({
+      title: 'No room for a continent',
+      tip: 'There is not enough open ocean for that style.',
+      next: 'Paint Ocean to clear a basin, or pick a smaller continent style.',
+      tone: 'warn',
+    })
     return
   }
   placeContinentAt(site.x, site.y)
@@ -1748,30 +1843,38 @@ function tryPlaceCity(x: number, y: number, force: boolean) {
   if (!world) return
   const past = gatePresentEdit(timelineAge)
   if (past) {
-    setStatus(`${past.title}: ${past.detail}`)
+    showCoach({ title: `Blocked: ${past.title}`, tip: past.detail, next: 'Set Age back to Present to found cities.', tone: 'warn' })
     return
   }
   const gate = gateCityPlacement(world, x, y)
   if (!gate.ok) {
     if (gate.hard || !force) {
-      setStatus(
-        gate.hard
-          ? `Blocked: ${gate.title} — ${gate.detail}`
-          : `Blocked: ${gate.title} (${((gate.score ?? 0) * 100) | 0}%). ${gate.detail}`,
-      )
+      showCoach({
+        title: `Blocked: ${gate.title}`,
+        tip: gate.hard
+          ? gate.detail
+          : `${gate.detail} Score ${((gate.score ?? 0) * 100) | 0}%. Hold Shift and click to force a poor site.`,
+        next: 'Use the Settle look (green = good). Ocean, peaks, and cliffs will always refuse.',
+        tone: 'warn',
+      })
       updateInspector()
       return
     }
   }
   const result = evaluateSuitability(world, x, y)
-  beginStroke('Found city')
+  beginStroke('Found city', {
+    title: `You founded a city`,
+    why: 'A settlement marker was placed. Heights, rivers, and climate did not change — only the city list.',
+  })
   strokeActive = false
   const name = nextCityName(world)
   world.cities.push({ x, y, name, score: result.score })
-  setStatus(
+  announceChange(
+    `You founded ${name}`,
     force && !result.ok
-      ? `Forced ${name} (${(result.score * 100) | 0}%).`
-      : `Founded ${name} — suitability ${(result.score * 100) | 0}%.`,
+      ? `Forced onto a poor site (score ${(result.score * 100) | 0}%). Land and weather are unchanged.`
+      : `Suitability ${(result.score * 100) | 0}%. Land and weather are unchanged.`,
+    'Rename it in the city list. Found more on green Settle-look land.',
   )
   updateInspector()
   updateCities()
@@ -1898,12 +2001,15 @@ function commitCityName(index: number, input: HTMLInputElement) {
     return
   }
   city.name = original
-  beginStroke(`Rename ${original}`)
+  beginStroke(`Rename ${original}`, {
+    title: `You renamed a city`,
+    why: `The settlement is now called ${next}. Land, rivers, and climate did not change.`,
+  })
   strokeActive = false
   city.name = next
   updateHistoryButtons()
   scheduleAutosave()
-  setStatus(`Renamed to ${next}`)
+  announceChange(`You renamed a city to ${next}`, 'Only the label changed. The map itself is the same.')
 }
 
 function updateCities() {

@@ -940,9 +940,31 @@ button.primary:hover {
   color: var(--ink-soft);
 }
 
-.coach-next span {
-  display: inline-block;
+.coach-changed {
+  margin: 0.15rem 0 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(28, 34, 28, 0.06);
+}
+
+.coach-changed-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.68rem;
   font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
   color: var(--ink);
-  margin-right: 0.25rem;
+}
+
+.coach-changed ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.28rem;
+}
+
+.coach-changed li {
+  font-size: 0.84rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
 }
