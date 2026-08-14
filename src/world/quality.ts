@@ -70,11 +70,12 @@ export const QUALITY_PRESETS: Record<MapQuality, QualityPreset> = {
   },
 }
 
-export const DEFAULT_MAP_QUALITY: MapQuality = 'hd'
+export const DEFAULT_MAP_QUALITY: MapQuality = 'standard'
 export const QUALITY_STORAGE_KEY = 'geoform.quality.v1'
 
-/** Prefer HD on desktop; standard on small screens. */
+/** Prefer Standard on published builds; HD locally on wide screens. */
 export function defaultMapQuality(): MapQuality {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.PROD) return 'standard'
   if (typeof window !== 'undefined' && window.innerWidth >= 1024) return 'hd'
   return 'standard'
 }
@@ -115,13 +116,17 @@ export function atlasRasterScaleForZoom(
   worldHeight: number,
   quality: MapQuality,
   viewZoom: number,
+  preview = false,
 ): number {
   const cells = worldWidth * worldHeight
   const base = atlasRasterScale(cells, quality) * displayPixelRatio()
   const desired = base * Math.max(1, viewZoom)
-  const maxPixels = 10_000_000
+  const maxPixels =
+    typeof import.meta !== 'undefined' && import.meta.env?.PROD ? 6_000_000 : 10_000_000
   const maxScale = Math.sqrt(maxPixels / Math.max(1, cells))
-  return Math.max(2, Math.min(maxScale, Math.round(desired)))
+  let scale = Math.max(2, Math.min(maxScale, Math.round(desired)))
+  if (preview) scale = Math.min(scale, 3)
+  return scale
 }
 
 /** Globe bake scale capped so textures stay within preset limits. */

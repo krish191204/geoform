@@ -192,6 +192,8 @@ let showTradeRoutes = false
 let settlementCoveragePct = 35
 /** Keep the loading overlay up until the first atlas bitmap is drawn. */
 let mapPaintPending = false
+/** First boot paint uses a low-res preview, then upgrades in the background. */
+let mapPaintPreview = false
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -369,6 +371,7 @@ function applyWorld(next: World, message: string) {
     refreshGeography(next, { sculpt: false })
   }
   mapPaintPending = true
+  mapPaintPreview = true
   setBusy(true, 'Rendering map…')
   invalidateRenderer()
   announceChange(
@@ -1121,6 +1124,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
     setClimatePhase('idle')
   } catch (err) {
     mapPaintPending = false
+    mapPaintPreview = false
     setBusy(false)
     throw err
   }
@@ -1494,10 +1498,15 @@ function bind() {
 
   const mapViewport = document.querySelector('#mapViewport')
   if (mapViewport && typeof ResizeObserver !== 'undefined') {
+    let resizeTimer: number | null = null
     const ro = new ResizeObserver(() => {
-      if (viewMode !== 'atlas' || !world) return
-      applyViewTransform()
-      invalidateRenderer()
+      if (viewMode !== 'atlas' || !world || mapPaintPending) return
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer)
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null
+        applyViewTransform()
+        invalidateRenderer()
+      }, 150)
     })
     ro.observe(mapViewport)
   }
@@ -2323,18 +2332,18 @@ function startLoop() {
 }
 
 /** Raster scale grows with zoom so scroll-in stays sharp (not CSS-upscaled blur). */
-function rasterScale(w: World): number {
-  return atlasRasterScaleForZoom(w.width, w.height, mapQuality, viewZoom)
+function rasterScale(w: World, preview = mapPaintPreview): number {
+  return atlasRasterScaleForZoom(w.width, w.height, mapQuality, viewZoom, preview)
 }
 
-function atlasDrawOpts() {
+function atlasDrawOpts(preview = mapPaintPreview) {
   const src = displayWorld()
   return {
     layer,
     showRivers: true,
     showCities: timelineAge < 8,
     showTradeRoutes: showTradeRoutes && timelineAge < 8,
-    scale: src ? rasterScale(src) : 4,
+    scale: src ? rasterScale(src, preview) : 4,
     hover,
     brush,
     tool,
@@ -2344,30 +2353,54 @@ function atlasDrawOpts() {
   }
 }
 
+function finishAtlasPaint() {
+  if (!mapPaintPending) return
+  mapPaintPending = false
+  setBusy(false)
+  const upgrade = mapPaintPreview
+  mapPaintPreview = false
+  if (upgrade) invalidateRenderer()
+}
+
 /** Draw the current world onto the canvas when a frame is requested. */
 function paint() {
   const src = displayWorld()
-  if (!src) return
+  if (!src) {
+    if (mapPaintPending) finishAtlasPaint()
+    return
+  }
   if (viewMode !== 'planet') fitAtlasCanvas()
   if (viewMode === 'planet') {
     if (!planet) return
     layoutPlanetIfNeeded()
-    planet.sync(
-      src,
-      globeLook,
-      `${src.seed}|${src.width}x${src.height}|${src.elev[0]}|${src.elev[(src.elev.length / 2) | 0]}|${src.seaLevel}|${src.biome[(src.biome.length / 2) | 0]}|${src.cities.length}|${climatePhase}|${Math.round(timelineAge)}`,
-      QUALITY_PRESETS[mapQuality],
-    )
-    planet.render()
+    try {
+      planet.sync(
+        src,
+        globeLook,
+        `${src.seed}|${src.width}x${src.height}|${src.elev[0]}|${src.elev[(src.elev.length / 2) | 0]}|${src.seaLevel}|${src.biome[(src.biome.length / 2) | 0]}|${src.cities.length}|${climatePhase}|${Math.round(timelineAge)}`,
+        QUALITY_PRESETS[mapQuality],
+      )
+      planet.render()
+    } finally {
+      finishAtlasPaint()
+    }
     return
   }
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')!
-  renderer.draw(ctx, src, atlasDrawOpts())
-  if (mapPaintPending) {
-    mapPaintPending = false
-    setBusy(false)
+  if (!canvas) {
+    finishAtlasPaint()
+    return
+  }
+  try {
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas 2D unavailable')
+    renderer.draw(ctx, src, atlasDrawOpts())
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('Atlas paint failed:', err)
+    setStatus(`Map render failed (${msg}). Try Draft quality + New world.`)
+  } finally {
+    finishAtlasPaint()
   }
 }
 
