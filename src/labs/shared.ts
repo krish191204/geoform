@@ -1,3 +1,7 @@
+/**
+ * Shared canvas helpers for labs: resize for sharp pixels, lerp, noise,
+ * drawing the little atmosphere vignette. Not the planet generator.
+ */
 export type StopFn = () => void
 
 export function resizeCanvas(canvas: HTMLCanvasElement) {

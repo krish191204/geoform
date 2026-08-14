@@ -1,3 +1,16 @@
+/**
+ * Brand-new planet from a seed.
+ *
+ * generateWorld() is "New world". It:
+ *  1. Drops tectonic plates (some continental, some oceanic).
+ *  2. Paints height from those plates (blobs + mountains at collisions).
+ *  3. Sets the water line from the Land % slider.
+ *  4. Reshapes into continents or islands.
+ *  5. Runs the quiet repair pipeline (climate, rivers, biomes).
+ *
+ * Same seed + same size + same land % + same mass mode = same map.
+ * Painting after that is your edits on top.
+ */
 import { recomputeDerived } from './climate'
 import { chewStraightCoasts, noisyPolarOcean } from './coasts'
 import { refreshGeography, sculptOrogeny } from './geography'
@@ -15,6 +28,7 @@ import type { Biome, City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
 
+/** One tectonic plate: a center, a slide direction, and "is this a continent plate?" */
 interface Plate {
   x: number
   y: number
@@ -24,6 +38,10 @@ interface Plate {
   radius: number
 }
 
+/**
+ * Stamp every cell with the nearest plate, after warping coordinates with noise
+ * so boundaries look like coasts, not Voronoi polygons.
+ */
 function assignPlates(w: number, h: number, plates: Plate[], seed: number): Int16Array {
   const plateId = new Int16Array(w * h)
   for (let y = 0; y < h; y++) {
@@ -50,12 +68,18 @@ function assignPlates(w: number, h: number, plates: Plate[], seed: number): Int1
   return plateId
 }
 
+/** Shortest step in X on a wrapping map (left vs right around the world). */
 function wrapDx(dx: number, w: number): number {
   if (dx > w / 2) dx -= w
   if (dx < -w / 2) dx += w
   return dx
 }
 
+/**
+ * Height from plates: continental plates raise a blob of land; ocean plates
+ * stay low unless noise pokes an island. Then plate edges add mountains
+ * (plates crashing), trenches (ocean diving under land), or rifts (pulling apart).
+ */
 function buildElevation(
   w: number,
   h: number,
@@ -201,6 +225,7 @@ const CITY_NAMES = [
   'Gildenreach',
 ]
 
+/** Build a fresh World. This is the New world button. */
 export function generateWorld(
   width: number,
   height: number,
@@ -212,6 +237,8 @@ export function generateWorld(
   const mass = clampContinentMass(continentMass)
   const recipe = massRecipe(mass)
   const rng = createRng(seed)
+  // Full continents: only a few continental plates, spaced around the globe.
+  // Islands: more plates, more of them oceanic, so land is scraps.
   const plateCount = recipe.plateMin + Math.floor(rng() * recipe.plateSpan)
   const plates: Plate[] = []
   const wantCont =
@@ -251,6 +278,7 @@ export function generateWorld(
     plateVy[i] = plates[i].vy * 0.32
   }
 
+  // Placeholder water line. applyLandRatio below picks the real one from Land %.
   const seaLevel = 0.44
 
   const world: World = {
@@ -277,10 +305,12 @@ export function generateWorld(
     engine: 'local',
     originX: 0,
     originY: 0,
+    // Freeze latitude against later zoom-out padding.
     latRows: height,
   }
 
   applyLandRatio(world, land)
+  // Drown speckles / keep islands, then nibble coasts to hit Land %.
   reshapeLandmasses(world)
   cohereLand(world.elev, width, height, world.seaLevel, recipe.speckleMax, recipe.pondMax)
   for (let p = 0; p < recipe.chewPasses; p++) {
@@ -290,10 +320,12 @@ export function generateWorld(
   if (recipe.speckleMax > 0) {
     cohereLand(world.elev, width, height, world.seaLevel, Math.max(4, recipe.speckleMax - 6), 6)
   }
+  // Climate, rivers, biomes. sculpt:false because we already raised mountains.
   refreshGeography(world, { sculpt: false })
   return world
 }
 
+/** Soft circular raise/lower used by older call sites. The editor brushes live in tools.ts. */
 export function paintElevation(
   world: World,
   cx: number,
@@ -318,6 +350,7 @@ export function paintElevation(
   recomputeDerived(world, false)
 }
 
+/** First unused name from the fake-city list, or "Settlement N". */
 export function nextCityName(world: World): string {
   const used = new Set(world.cities.map((c) => c.name))
   for (const n of CITY_NAMES) {

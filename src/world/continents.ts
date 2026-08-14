@@ -1,3 +1,13 @@
+/**
+ * "Add a continent" tool — drop a new landmass into empty ocean.
+ *
+ * Styles (collision, rift, arcs, …) change *how* the new land meets the old:
+ * mountains where coasts face, rifts that pull apart, island arcs, etc.
+ * After placing, we run refreshGeography so climate and rivers catch up.
+ *
+ * This is not the Full continents dropdown. That dropdown is mass.ts.
+ * This file is the stamp you click onto the map.
+ */
 import { chewStraightCoasts } from './coasts'
 import { ensurePlateMotion, refreshGeography, sculptOrogeny } from './geography'
 import { fbm } from './noise'
@@ -46,12 +56,17 @@ export const CONTINENT_STYLES: { id: ContinentStyle; label: string; desc: string
   },
 ]
 
+/** Wrap longitude: shortest way around the cylinder. */
 function wrapDx(dx: number, w: number): number {
   if (dx > w / 2) dx -= w
   if (dx < -w / 2) dx += w
   return dx
 }
 
+/**
+ * Distance from each cell to the nearest land. Ocean far from land = high number.
+ * Used to drop a new continent in empty sea (drift) or near an existing coast (collision).
+ */
 function landDistance(world: World): Float32Array {
   const { width: w, height: h, elev, seaLevel } = world
   const dist = new Float32Array(w * h)
@@ -88,6 +103,7 @@ function landDistance(world: World): Float32Array {
   return dist
 }
 
+/** Pick an ocean cell for the new continent, depending on style (far out vs near a coast). */
 export function findOceanSite(world: World, style: ContinentStyle): { x: number; y: number } | null {
   const { width: w, elev, seaLevel } = world
   const dist = landDistance(world)
@@ -208,6 +224,10 @@ function smoothLocal(world: World, times: number) {
   }
 }
 
+/**
+ * Stamp a new land blob at (cx, cy) and restyle nearby coasts for this style.
+ * Then refresh geography so rivers and climate catch up.
+ */
 export function addContinent(
   world: World,
   cx: number,
@@ -216,6 +236,13 @@ export function addContinent(
   radius: number,
 ): { ok: boolean; message: string } {
   const { width: w, height: h, elev, plateId, seaLevel } = world
+  // Continents grow from the sea. Stamping on land stacks nonsense mountains.
+  if (cx < 0 || cy < 0 || cx >= w || cy >= h || elev[cy * w + cx] >= seaLevel) {
+    return {
+      ok: false,
+      message: 'Click open ocean — new continents grow from the sea, not on existing land.',
+    }
+  }
   const r = Math.max(12, Math.min(52, radius))
   let maxId = 0
   for (let i = 0; i < plateId.length; i++) maxId = Math.max(maxId, plateId[i])

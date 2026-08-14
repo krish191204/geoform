@@ -1,3 +1,15 @@
+/**
+ * Built-in Geoform worlds for the critique gallery.
+ * healthy  = a normal generated map (should score well).
+ * broken   = we vandalize height on purpose (rectangle, all-land slab, speckle)
+ *            so you can see the grader catch it. Repair runs the editor pipeline.
+ */
+/**
+ * Built-in Geoform worlds for the critique gallery.
+ * healthy  = a normal generated map (should score well).
+ * broken   = we vandalize height on purpose (rectangle, all-land slab, speckle)
+ *            so you can see the grader catch it. Repair runs the editor pipeline.
+ */
 import { generateWorld } from '../world/generate'
 import { harmonizeWorld } from '../world/geography'
 import { serializeWorld } from '../world/persist'
@@ -11,6 +23,7 @@ export interface GeoformSample {
   world: World
 }
 
+/** Stamp a green rectangle in the ocean — the "this is not a continent" fixture. */
 function rectangleWorld(): World {
   const world = generateWorld(96, 48, 7, 0.4, 'continents')
   world.elev.fill(world.seaLevel - 0.12)
@@ -23,6 +36,7 @@ function rectangleWorld(): World {
   return world
 }
 
+/** All land, no ocean — climate left dead on purpose. */
 function slabWorld(): World {
   const world = generateWorld(96, 48, 9, 0.4, 'continents')
   world.elev.fill(0.7)
@@ -31,11 +45,13 @@ function slabWorld(): World {
   return world
 }
 
+/** Island-world speckle at low land % — looks like acne if you wanted continents. */
 function speckleWorld(): World {
   const world = generateWorld(96, 48, 21, 0.22, 'islands')
   return world
 }
 
+/** The gallery list: two healthy worlds plus three vandalized ones. */
 export function getGeoformSamples(): GeoformSample[] {
   return [
     {
@@ -87,6 +103,7 @@ export function worldToJson(world: World) {
   return serializeWorld(world)
 }
 
+/** Run the same silent repair the editor uses. Does not mutate the gallery original. */
 export function repairedCopy(world: World): World {
   const copy = {
     ...world,

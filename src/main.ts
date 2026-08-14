@@ -1,6 +1,33 @@
+/**
+ * Map editor page (`/`). This is the big one.
+ *
+ * Mental model:
+ *  - `world` is the planet (arrays). Null until boot finishes.
+ *  - `history` is undo/redo snapshots.
+ *  - `renderer` draws the canvas from those arrays.
+ *  - Buttons mutate `world`, then we redraw.
+ *
+ * Default engine is Local (browser). WorldEngine is the optional dropdown.
+ * Typical size: 320×160. Zoom-out adds real cells (expand.ts), it does not
+ * CSS-shrink the picture.
+ *
+ * If you are lost, open HOW_IT_WORKS.md then src/world/types.ts.
+ */
 import './style.css'
 import { navHtml } from './chrome/nav'
+import {
+  continentStyleIcon,
+  layerIcon,
+  massIcon,
+  TOOL_ICONS,
+} from './chrome/toolIcons'
 import { evaluateSuitability, recomputeDerived, recomputeSuitability } from './world/climate'
+import {
+  gateCityPlacement,
+  gateContinentPlacement,
+  gatePresentEdit,
+  gateRazeCity,
+} from './world/placement'
 import { generateWorld, nextCityName } from './world/generate'
 import { EditHistory } from './world/history'
 import {
@@ -43,6 +70,8 @@ const HEIGHT = 160
 
 type EngineChoice = 'local' | 'worldengine'
 
+// --- live editor state (one planet, one brush, one view) ---
+
 const TERRAIN_TOOLS: Tool[] = [
   'raise',
   'lower',
@@ -83,6 +112,7 @@ let planet: PlanetView | null = null
 let panning = false
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let spaceDown = false
+let shiftDown = false
 let climatePhase: 'idle' | 'painting' | 'updating' = 'idle'
 let pendingNewWorld: (() => void) | null = null
 let timelineAge = 0
@@ -94,6 +124,7 @@ let raf = 0
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 
+/** Debounced write to localStorage. Another computer will not see this. */
 function scheduleAutosave() {
   if (!world) return
   if (autosaveTimer !== null) window.clearTimeout(autosaveTimer)
@@ -112,6 +143,7 @@ function setStatus(msg: string) {
   if (el) el.textContent = status
 }
 
+/** Swap in a new planet (New world, Load, undo). Reset the deep-time slider to Present. */
 function applyWorld(next: World, message: string) {
   world = next
   seed = next.seed
@@ -145,6 +177,7 @@ function resetView() {
   applyViewTransform()
 }
 
+/** Size the canvas so the whole grid fits in the map pane (letterbox is UI, not ocean). */
 function fitAtlasCanvas() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   const vp = document.querySelector<HTMLElement>('#mapViewport')
@@ -180,6 +213,7 @@ function isLayerLook(look: MapLook): look is Layer {
   return look !== 'satellite' && look !== 'night'
 }
 
+/** Atlas = 2D map. Planet = 3D globe of the same arrays. */
 function setViewMode(mode: 'atlas' | 'planet') {
   viewMode = mode
   const map = document.querySelector<HTMLCanvasElement>('#map')
@@ -229,7 +263,7 @@ function renderLayerChips() {
   layers.innerHTML = defs
     .map(
       (l) =>
-        `<button type="button" class="chip ${current === l.id ? 'active' : ''}" data-look="${l.id}">${l.label}</button>`,
+        `<button type="button" class="chip ${current === l.id ? 'active' : ''}" data-look="${l.id}">${layerIcon(l.id)}<span>${l.label}</span></button>`,
     )
     .join('')
   layers.querySelectorAll<HTMLButtonElement>('[data-look]').forEach((btn) => {
@@ -273,6 +307,7 @@ function syncLandRatioUi() {
   if (waterEl) waterEl.textContent = String(100 - pct)
 }
 
+/** Present map, or a reconstructed past if the Age slider is not 0. */
 function displayWorld(): World | null {
   if (timelineAge > 0.5 && timelineView) return timelineView
   return world
@@ -343,6 +378,10 @@ function zoomFocus(clientX: number, clientY: number): { fx: number; fy: number }
   }
 }
 
+/**
+ * Zoom-out: add real cells around the map so it still fills the view.
+ * If we are already at 640×320 we just zoom the camera instead.
+ */
 function tryExpandOnZoomOut(factor: number, fx: number, fy: number): boolean {
   if (!world || busy || strokeActive || factor >= 1) return false
   const vp = document.querySelector<HTMLElement>('#mapViewport')
@@ -497,6 +536,7 @@ function askNewWorld(run: () => void) {
   banner.querySelector('#confirmCancel')?.addEventListener('click', hideConfirm)
 }
 
+/** Build the HTML chrome (buttons, sliders). Called once at boot, then we patch bits. */
 function renderShell() {
   const worldTrailing = `
     <div class="nav-trailing">
@@ -621,6 +661,7 @@ function renderShell() {
   void boot()
 }
 
+/** Is the optional WorldEngine Python API up? If not, we stay on Local. */
 async function apiHealthy(): Promise<boolean> {
   try {
     const res = await fetch('/health', { cache: 'no-store' })
@@ -640,6 +681,7 @@ function hideApiDown() {
   }
 }
 
+/** New world using the TypeScript generator. Always works offline. */
 function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
   setStatus('Generating local world…')
@@ -659,6 +701,7 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   }
 }
 
+/** First paint: restore autosave if this browser has one, else generate a new seed. */
 async function boot() {
   hideApiDown()
   engineChoice = 'local'
@@ -691,6 +734,7 @@ function setBusy(on: boolean, message?: string) {
   })
 }
 
+/** New world: Local generator, or WorldEngine if you picked that dropdown and the API is up. */
 async function loadWorld(nextSeed: number) {
   if (engineChoice !== 'worldengine') {
     loadLocalWorld(nextSeed)
@@ -718,6 +762,7 @@ async function loadWorld(nextSeed: number) {
   }
 }
 
+/** After painting, wait a beat then rebuild climate/rivers. Immediate = no wait. */
 function scheduleClimateRecompute(immediate = false) {
   if (!world) return
   if (recomputeTimer !== null) window.clearTimeout(recomputeTimer)
@@ -764,6 +809,7 @@ function scheduleClimateRecompute(immediate = false) {
   else recomputeTimer = window.setTimeout(() => void run(), 160)
 }
 
+/** Snapshot undo BEFORE the stroke. One undo undoes the whole drag, not each pixel. */
 function beginStroke(label: string) {
   if (!world || strokeActive) return
   history.push(world, label)
@@ -840,8 +886,9 @@ function setTool(next: Tool) {
   })
   const hud = document.querySelector('#hudTool')
   const def = TOOL_DEFS.find((t) => t.id === tool)
-  if (hud && def) hud.textContent = def.label
+  if (hud && def) hud.innerHTML = `${TOOL_ICONS[def.id]}<span>${def.label}</span>`
   syncContinentHint()
+  syncPlacementCursor()
 }
 
 const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
@@ -853,31 +900,73 @@ const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'plateau', label: 'Plateau', desc: 'Flatten a highland', key: '6' },
   { id: 'sea', label: 'Ocean', desc: 'Paint below sea level', key: '7' },
   { id: 'land', label: 'Land', desc: 'Raise above the sea', key: '8' },
-  { id: 'city', label: 'Found city', desc: 'Place where geography allows', key: '9' },
+  { id: 'city', label: 'Found city', desc: 'Only on good land — ocean & peaks blocked', key: '9' },
   { id: 'razecity', label: 'Raze city', desc: 'Remove a nearby city', key: '0' },
   { id: 'inspect', label: 'Inspect', desc: 'Read cell climate & score', key: 'I' },
-  { id: 'continent', label: 'Add continent', desc: 'New landmass; plates rewrite', key: 'C' },
+  { id: 'continent', label: 'Add continent', desc: 'Click open ocean only', key: 'C' },
 ]
 
+/** Live gate for the cell under the cursor (city / continent / raze). */
+function hoverPlacementGate(forceSoft = shiftDown) {
+  if (!world || !hover) return null
+  const past = gatePresentEdit(timelineAge)
+  if (past && (tool === 'city' || tool === 'continent' || tool === 'razecity')) return past
+  if (tool === 'city') {
+    const gate = gateCityPlacement(world, hover.x, hover.y)
+    if (gate.ok) return gate
+    if (!gate.hard && forceSoft) return { ...gate, ok: true, title: 'Force place', detail: gate.detail }
+    return gate
+  }
+  if (tool === 'continent') return gateContinentPlacement(world, hover.x, hover.y, continentStyle)
+  if (tool === 'razecity') return gateRazeCity(world, hover.x, hover.y)
+  return null
+}
+
+/** Red ring / not-allowed cursor when a stamp would be refused. */
+function syncPlacementCursor(forceSoft = shiftDown) {
+  const canvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (!canvas) return
+  const gate = hoverPlacementGate(forceSoft)
+  canvas.classList.toggle('place-ok', !!gate?.ok)
+  canvas.classList.toggle('place-blocked', !!gate && !gate.ok)
+  if (tool === 'city' || tool === 'continent' || tool === 'razecity') {
+    canvas.style.cursor = !gate ? 'crosshair' : gate.ok ? 'copy' : 'not-allowed'
+  } else if (tool === 'inspect') {
+    canvas.style.cursor = 'help'
+  } else {
+    canvas.style.cursor = 'crosshair'
+    canvas.classList.remove('place-ok', 'place-blocked')
+  }
+}
+
+/** Mouse / keyboard / slider wiring. This is most of the page's behavior. */
 function bind() {
   const tools = document.querySelector('#tools')!
   tools.innerHTML = TOOL_DEFS.map(
     (t) =>
-      `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}">
-        <span class="tool-main"><span>${t.label}</span><kbd>${t.key}</kbd></span>
+      `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}" title="${t.desc}">
+        <span class="tool-main">
+          <span class="tool-label">${TOOL_ICONS[t.id]}<span>${t.label}</span></span>
+          <kbd>${t.key}</kbd>
+        </span>
         <small>${t.desc}</small>
       </button>`,
   ).join('')
   tools.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
     btn.addEventListener('click', () => setTool(btn.dataset.tool as Tool))
   })
+  const hudTool = document.querySelector('#hudTool')
+  if (hudTool) {
+    const def = TOOL_DEFS.find((t) => t.id === tool)
+    if (def) hudTool.innerHTML = `${TOOL_ICONS[def.id]}<span>${def.label}</span>`
+  }
 
   const styles = document.querySelector('#continentStyles')
   if (styles) {
     styles.innerHTML = CONTINENT_STYLES.map(
       (s) =>
         `<button type="button" class="style-chip ${s.id === continentStyle ? 'active' : ''}" data-style="${s.id}" title="${s.desc}">
-          <span>${s.label}</span>
+          <span class="style-label">${continentStyleIcon(s.id)}<span>${s.label}</span></span>
           <small>${s.desc}</small>
         </button>`,
     ).join('')
@@ -887,6 +976,7 @@ function bind() {
         styles.querySelectorAll('.style-chip').forEach((b) => b.classList.remove('active'))
         btn.classList.add('active')
         syncContinentHint()
+        syncPlacementCursor()
       })
     })
   }
@@ -896,7 +986,7 @@ function bind() {
     massBox.innerHTML = CONTINENT_MASS_OPTIONS.map(
       (s) =>
         `<button type="button" class="style-chip ${s.id === continentMass ? 'active' : ''}" data-mass="${s.id}" title="${s.desc}">
-          <span>${s.label}</span>
+          <span class="style-label">${massIcon(s.id)}<span>${s.label}</span></span>
           <small>${s.desc}</small>
         </button>`,
     ).join('')
@@ -1084,9 +1174,19 @@ function bind() {
     }
     const byKey = TOOL_DEFS.find((t) => t.key.toLowerCase() === e.key.toLowerCase())
     if (byKey) setTool(byKey.id)
+    if (e.key === 'Shift') {
+      shiftDown = true
+      syncPlacementCursor()
+      updateInspector()
+    }
   })
   window.addEventListener('keyup', (e) => {
     if (e.code === 'Space') spaceDown = false
+    if (e.key === 'Shift') {
+      shiftDown = false
+      syncPlacementCursor()
+      updateInspector()
+    }
   })
 
   const canvas = document.querySelector<HTMLCanvasElement>('#map')!
@@ -1128,6 +1228,17 @@ function bind() {
     }
 
     if (tool === 'razecity') {
+      const past = gatePresentEdit(timelineAge)
+      if (past) {
+        setStatus(`${past.title}: ${past.detail}`)
+        return
+      }
+      const gate = gateRazeCity(world, cell.x, cell.y)
+      if (!gate.ok) {
+        setStatus(`${gate.title}: ${gate.detail}`)
+        updateInspector()
+        return
+      }
       beginStroke('Raze city')
       strokeActive = false
       const removed = removeNearestCity(world, cell.x, cell.y)
@@ -1223,6 +1334,7 @@ function bind() {
       applyAt(e.clientX, e.clientY, e.shiftKey)
     } else {
       updateInspector()
+      syncPlacementCursor()
     }
   })
   const endPointer = () => {
@@ -1235,6 +1347,7 @@ function bind() {
   canvas.addEventListener('pointercancel', endPointer)
   canvas.addEventListener('pointerleave', () => {
     if (!painting) hover = null
+    syncPlacementCursor()
   })
   canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
@@ -1312,13 +1425,24 @@ function syncContinentHint() {
   if (el && def) {
     el.textContent =
       tool === 'continent'
-        ? `Click ocean to place — ${def.desc}`
+        ? `Click open ocean only — ${def.desc}`
         : `${def.desc} · choose Add continent (C) or Auto-place`
   }
 }
 
 function placeContinentAt(x: number, y: number) {
   if (!world || busy) return
+  const past = gatePresentEdit(timelineAge)
+  if (past) {
+    setStatus(`${past.title}: ${past.detail}`)
+    return
+  }
+  const gate = gateContinentPlacement(world, x, y, continentStyle)
+  if (!gate.ok) {
+    setStatus(`${gate.title}: ${gate.detail}`)
+    updateInspector()
+    return
+  }
   const style = CONTINENT_STYLES.find((s) => s.id === continentStyle)
   beginStroke(style ? `Add ${style.label.toLowerCase()}` : 'Add continent')
   strokeActive = false
@@ -1354,17 +1478,24 @@ function placeContinentAuto() {
 
 function tryPlaceCity(x: number, y: number, force: boolean) {
   if (!world) return
+  const past = gatePresentEdit(timelineAge)
+  if (past) {
+    setStatus(`${past.title}: ${past.detail}`)
+    return
+  }
+  const gate = gateCityPlacement(world, x, y)
+  if (!gate.ok) {
+    if (gate.hard || !force) {
+      setStatus(
+        gate.hard
+          ? `Blocked: ${gate.title} — ${gate.detail}`
+          : `Blocked: ${gate.title} (${((gate.score ?? 0) * 100) | 0}%). ${gate.detail}`,
+      )
+      updateInspector()
+      return
+    }
+  }
   const result = evaluateSuitability(world, x, y)
-  if (world.cities.some((c) => Math.hypot(c.x - x, c.y - y) < 4)) {
-    setStatus('Too close to an existing city.')
-    updateInspector()
-    return
-  }
-  if (!result.ok && !force) {
-    setStatus(`Blocked: ${result.reasons[0]} (${(result.score * 100) | 0}%). Hold Shift to force.`)
-    updateInspector()
-    return
-  }
   beginStroke('Found city')
   strokeActive = false
   const name = nextCityName(world)
@@ -1390,6 +1521,7 @@ function startLoop() {
   raf = requestAnimationFrame(tick)
 }
 
+/** Fewer pixels on huge grids so the canvas stays snappy. */
 function rasterScale(w: World): number {
   const cells = w.width * w.height
   if (cells > 160_000) return 2
@@ -1397,6 +1529,7 @@ function rasterScale(w: World): number {
   return 4
 }
 
+/** Draw the current world onto the canvas. Called every animation frame while dirty. */
 function paint() {
   const src = displayWorld()
   if (!src) return
@@ -1424,6 +1557,7 @@ function paint() {
     tool,
     painting,
     riversMuted: climatePhase !== 'idle',
+    placeOk: hoverPlacementGate()?.ok ?? null,
   })
 }
 
@@ -1442,7 +1576,17 @@ function updateInspector() {
   const suit = evaluateSuitability(src, x, y)
   const above = src.elev[i] >= src.seaLevel
   const landPct = Math.round(landFraction(src.elev, src.seaLevel) * 100)
+  const gate = hoverPlacementGate()
+  const placeBanner =
+    gate && (tool === 'city' || tool === 'continent' || tool === 'razecity')
+      ? `<div class="place-banner ${gate.ok ? 'ok' : gate.hard ? 'hard' : 'soft'}">
+          <strong>${gate.ok ? 'Can place' : gate.hard ? 'Blocked' : 'Poor site'}</strong>
+          <span>${gate.title}${gate.score != null ? ` · ${(gate.score * 100) | 0}%` : ''}</span>
+          <small>${gate.detail}</small>
+        </div>`
+      : ''
   el.innerHTML = `
+    ${placeBanner}
     <div class="inspect-head">
       <strong>${x}, ${y}</strong>
       <span class="pill ${above ? 'land' : 'sea'}">${above ? 'Land' : 'Ocean'}</span>

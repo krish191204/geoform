@@ -1,3 +1,18 @@
+/**
+ * The shape of a planet in RAM.
+ *
+ * Start here if you are lost. A World is not a picture. It is a pile of
+ * arrays the same length as width * height. The canvas is just a drawing
+ * of these numbers.
+ *
+ * Cell (x, y) lives at index:  y * width + x
+ * Walk off the right edge and you wrap to the left (a cylinder).
+ * Do not wrap top/bottom — those are poles.
+ *
+ * Longer tour: HOW_IT_WORKS.md at the repo root.
+ */
+
+/** Which coloring the atlas canvas uses. Relief = pretty shaded land. */
 export type Layer =
   | 'relief'
   | 'plates'
@@ -7,6 +22,7 @@ export type Layer =
   | 'biome'
   | 'suitability'
 
+/** What the mouse does when you click the map. */
 export type Tool =
   | 'raise'
   | 'lower'
@@ -21,16 +37,18 @@ export type Tool =
   | 'inspect'
   | 'continent'
 
-/** WorldEngine Holdridge names + a few UI aliases */
+/** A biome is just a label like "ocean" or "tropical rain forest". */
 export type Biome = string
 
 export interface City {
   x: number
   y: number
   name: string
+  /** 0 = terrible place to live, 1 = great. */
   score: number
 }
 
+/** Why a cell can or cannot host a city. */
 export interface SuitabilityResult {
   score: number
   ok: boolean
@@ -38,41 +56,75 @@ export interface SuitabilityResult {
 }
 
 export interface World {
+  /** Cells across (longitude). Typical: 320. */
   width: number
+  /** Cells down (latitude). Typical: 160. */
   height: number
+  /** Random number that built this planet. Same seed → same new world. */
   seed: number
+  /**
+   * The water line. Height below this is ocean. Height above is land.
+   * Usually around 0.34 after we pick a land/water mix.
+   */
   seaLevel: number
-  /** Target share of cells that should be land (the rest is water). */
+  /**
+   * Wish, not a measurement: "I want this fraction of cells to be land."
+   * 0.40 means 40% land. The slider writes this. Repair tries to honor it
+   * by growing or shrinking existing coasts — not by sprinkling islands.
+   */
   landRatio: number
-  /** How land should clump: full continents, mixed, or speckle islands. */
+  /**
+   * How land should clump.
+   * continents = 2–3 big blobs (Earth look). Speckles get drowned.
+   * mixed      = a few big ones plus leftovers.
+   * islands    = keep the speckles. Only this mode wants archipelagos.
+   */
   continentMass: 'continents' | 'mixed' | 'islands'
+  /** Which tectonic plate owns each cell. Integer ids, 0..plateCount-1. */
   plateId: Int16Array
+  /** Ground height per cell, 0 (deep sea) to 1 (huge mountain). */
   elev: Float32Array
+  /** How warm, 0 cold … 1 hot. Equator hot, poles cold, mountains colder. */
   temp: Float32Array
+  /** How wet the climate thinks this cell is. Ocean is always wet. */
   moist: Float32Array
+  /** How much river water tries to flow through this cell. Fat rivers = high flux. */
   flux: Float32Array
+  /** One biome name per cell, derived from height + temp + rain. */
   biome: Biome[]
+  /** How good this cell is for a city. Same 0..1 idea as City.score. */
   suitability: Float32Array
   cities: City[]
   plateCount: number
-  /** Plate velocity in cells per million years. */
+  /** How fast each plate slides, in cells per million years. */
   plateVx: Float32Array
   plateVy: Float32Array
-  /** WorldEngine raw elevation calibration (for recompute) */
+  /** WorldEngine-only: original height range so we can send edits back. */
   rawElevMin: number
   rawElevMax: number
   rawSeaThreshold: number
+  /**
+   * Which generator made this map.
+   * local       = this repo's TypeScript (the default).
+   * worldengine = optional WASM/Python backend. Ignore until Local makes sense.
+   */
   engine: 'worldengine' | 'local'
-  /** World-space origin of cell (0,0); shifts when the map expands. */
+  /**
+   * World-space origin of cell (0,0). When you zoom out we add cells around
+   * the map, so the old (0,0) is no longer the corner. originX/Y remember that.
+   */
   originX: number
   originY: number
-  /** Row count used for latitude 0..1; frozen at generate so expand does not restyle land. */
+  /**
+   * How many rows "full planet latitude" uses. Frozen at generate so zoom-out
+   * padding does not suddenly restyle climate (equator would jump).
+   */
   latRows: number
 }
 
 const FALLBACK_BIOME = '#6e7f6a'
 
-/** Colors for WorldEngine biomes + simple aliases */
+/** Paint-by-numbers colors for WorldEngine biome names, plus short aliases (forest, desert). */
 export const BIOME_COLORS: Record<string, string> = {
   ocean: '#1f5f74',
   coast: '#3d8a9a',
@@ -126,6 +178,7 @@ export const BIOME_COLORS: Record<string, string> = {
   alpine: '#8a8f8c',
 }
 
+/** Look up a biome color. Unknown names get a fuzzy match, then grey-green. */
 export function biomeColor(name: string): string {
   if (BIOME_COLORS[name]) return BIOME_COLORS[name]
   // fuzzy fallbacks
@@ -141,6 +194,7 @@ export function biomeColor(name: string): string {
   return FALLBACK_BIOME
 }
 
+/** JSON shape WorldEngine sends over /api. Converted in worldengine.ts. */
 export interface WorldEnginePayload {
   engine: string
   width: number

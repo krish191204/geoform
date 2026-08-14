@@ -1,3 +1,8 @@
+/**
+ * Labs page (`/labs.html`). Tiny demos of one rule each.
+ * Same generator as the editor. The editor applies these quietly;
+ * labs let you feel elevation, rivers, rain, plates, cities, continents.
+ */
 import './style.css'
 import { navHtml } from '../chrome/nav'
 import { LABS, type LabId } from './content'

@@ -1,3 +1,18 @@
+/**
+ * What the paintbrush actually does to height.
+ *
+ * Every brush walks a circle of cells around the cursor. weight() is "how
+ * much this cell is inside the brush" (1 at the center, 0 at the edge),
+ * with noise so stamps are not perfect circles.
+ *
+ * Raise / lower change height. Smooth averages neighbors. Ridge is a thin
+ * mountain along the stroke. Channel is ridge but downward (a valley).
+ * Sea / land push cells below or above the water line.
+ *
+ * After a stroke the editor asks climate.ts to rebuild weather. We do not
+ * reshape continents on every dab — that would eat your rectangle while
+ * you are still drawing it. Refresh geography does that later.
+ */
 import { evaluateSuitability } from './climate'
 import { nextCityName } from './generate'
 import { fbm } from './noise'
@@ -5,6 +20,7 @@ import type { City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
 
+/** Copy height so undo can restore it. TypedArrays need a real copy, not a pointer. */
 export function cloneElev(elev: Float32Array): Float32Array {
   return new Float32Array(elev)
 }
@@ -17,6 +33,7 @@ export function clonePlateId(plateId: Int16Array): Int16Array {
   return new Int16Array(plateId)
 }
 
+/** If the grid grew (zoom-out) but climate arrays are still the old size, make new ones. */
 export function ensureDerived(world: World): void {
   const n = world.width * world.height
   if (world.temp.length === n && world.biome.length === n) return
@@ -27,7 +44,7 @@ export function ensureDerived(world: World): void {
   world.suitability = new Float32Array(n)
 }
 
-/** Soft falloff brush weight in [0,1], with a ragged radius so stamps are not geometric. */
+/** Soft falloff brush weight in [0,1]. 1 at the cursor, 0 at the edge. Noise makes the circle ragged so stamps are not perfect disks. */
 function weight(
   dx: number,
   dy: number,
@@ -45,6 +62,7 @@ function weight(
   return Math.pow(t, 1.2 / soft)
 }
 
+/** Raise land under the brush. amount can be negative = lower. */
 export function brushRaise(
   world: World,
   cx: number,
@@ -66,6 +84,7 @@ export function brushRaise(
   }
 }
 
+/** Blend each cell toward its neighbors. Softens cliffs. */
 export function brushSmooth(
   world: World,
   cx: number,
@@ -210,6 +229,7 @@ export function brushSeaLevel(
   }
 }
 
+/** Drop cities on the best unused cells, spaced apart so they are not a pile. */
 export function suggestCities(world: World, count: number): City[] {
   const { width: w, height: h } = world
   const candidates: { x: number; y: number; score: number }[] = []
@@ -238,6 +258,7 @@ export function suggestCities(world: World, count: number): City[] {
   return placed
 }
 
+/** Delete the city closest to (x, y) if it is within maxDist cells. */
 export function removeNearestCity(world: World, x: number, y: number, maxDist = 5): City | null {
   let best = -1
   let bestD = maxDist

@@ -2,6 +2,8 @@
 
 Geoform is a browser worldbuilding app. Paint a heightfield; climate, rivers, and biomes follow; cities sit where land can support them. Default engine: **Local (browser)**. Typical world: **320×160**.
 
+**New here?** Read [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md) first. It explains the grid, land vs sea, and which file does what, in plain English. The source is also commented that way.
+
 Pages:
 
 - Map editor `/` — paint, Full continents vs islands, silent geography repair
