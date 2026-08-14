@@ -207,23 +207,10 @@ function buildElevation(
 }
 
 
-const CITY_NAMES = [
-  'Ashmere',
-  'Korrin',
-  'Velport',
-  'Dunhollow',
-  'Sableford',
-  'Irien',
-  'Marost',
-  'Cairnwick',
-  'Leth',
-  'Orendale',
-  'Thalass',
-  'Brinek',
-  'Yarrow',
-  'Solmere',
-  'Gildenreach',
-]
+/** Default label until the author renames it. */
+export function nextCityName(_world: World): string {
+  return 'Settlement'
+}
 
 /** Build a fresh World. This is the New world button. */
 export function generateWorld(
@@ -351,11 +338,3 @@ export function paintElevation(
   recomputeDerived(world, false)
 }
 
-/** First unused name from the fake-city list, or "Settlement N". */
-export function nextCityName(world: World): string {
-  const used = new Set(world.cities.map((c) => c.name))
-  for (const n of CITY_NAMES) {
-    if (!used.has(n)) return n
-  }
-  return `Settlement ${world.cities.length + 1}`
-}
