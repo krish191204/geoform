@@ -725,6 +725,22 @@ function tutorialHooks() {
     setRaiseTool: () => setTool('raise'),
     setStatus,
     onComplete: () => showCoach(coachTool(tool)),
+    setMapBeacon: (on: boolean) => {
+      const shell = document.querySelector('.map-shell')
+      if (!shell) return
+      let beacon = document.querySelector<HTMLElement>('#tutorialMapBeacon')
+      if (!on) {
+        beacon?.remove()
+        return
+      }
+      if (!beacon) {
+        beacon = document.createElement('div')
+        beacon.id = 'tutorialMapBeacon'
+        beacon.className = 'tutorial-map-beacon'
+        shell.appendChild(beacon)
+      }
+      beacon.innerHTML = `Paint here ↓<small>Drag on green / brown land</small>`
+    },
   }
 }
 

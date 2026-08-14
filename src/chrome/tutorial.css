@@ -14,15 +14,46 @@
   backdrop-filter: blur(6px);
 }
 
+/**
+ * Paint practice: do NOT cover the map.
+ * Full-screen root is click-through; only a slim docked card catches clicks.
+ */
 .tutorial-root[data-mode='practice'] {
-  background: rgba(18, 24, 20, 0.28);
-  place-items: end center;
-  padding-bottom: 1.5rem;
+  display: block;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   pointer-events: none;
+  padding: 0;
 }
 
 .tutorial-root[data-mode='practice'] .tutorial-card {
   pointer-events: auto;
+  position: fixed;
+  left: 50%;
+  bottom: 0.85rem;
+  transform: translateX(-50%);
+  width: min(28rem, calc(100vw - 1.5rem));
+  max-height: 32vh;
+  overflow: auto;
+  padding: 0.85rem 1rem 0.9rem;
+  gap: 0.45rem;
+  box-shadow: 0 12px 36px rgba(12, 16, 14, 0.35);
+  border: 2px solid rgba(184, 90, 42, 0.55);
+  z-index: 210;
+}
+
+.tutorial-root[data-mode='practice'] .tutorial-card h2 {
+  font-size: 1.15rem;
+}
+
+.tutorial-root[data-mode='practice'] .tutorial-card p,
+.tutorial-root[data-mode='practice'] .tutorial-card li {
+  font-size: 0.92rem;
+}
+
+.tutorial-root[data-mode='practice'] .tutorial-card ul {
+  display: none; /* keep the dock short so the map stays visible */
 }
 
 .tutorial-card {
@@ -137,6 +168,51 @@
   font-weight: 600;
 }
 
+/* Big “paint here” badge on the map during practice */
+.tutorial-map-beacon {
+  position: absolute;
+  top: 0.85rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  pointer-events: none;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: rgba(184, 90, 42, 0.95);
+  color: #fff8f0;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  box-shadow: 0 10px 28px rgba(20, 24, 20, 0.35);
+  white-space: nowrap;
+  animation: tutorial-beacon-pulse 1.4s ease-in-out infinite;
+}
+
+.tutorial-map-beacon small {
+  display: block;
+  font-weight: 500;
+  font-size: 0.75rem;
+  opacity: 0.92;
+  margin-top: 0.15rem;
+  text-align: center;
+}
+
+@keyframes tutorial-beacon-pulse {
+  0%,
+  100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tutorial-map-beacon {
+    animation: none;
+  }
+}
+
 #app.tutorial-locked .chrome,
 #app.tutorial-locked .panel,
 #app.tutorial-locked .map-overlay,
@@ -145,14 +221,29 @@
   filter: grayscale(0.25) brightness(0.92);
 }
 
+#app.tutorial-locked.tutorial-practice .chrome,
+#app.tutorial-locked.tutorial-practice .panel {
+  filter: grayscale(0.35) brightness(0.88);
+  opacity: 0.55;
+}
+
 #app.tutorial-locked.tutorial-practice .map-viewport,
 #app.tutorial-locked.tutorial-practice #map {
   pointer-events: auto;
   filter: none;
+  opacity: 1;
 }
 
 #app.tutorial-locked.tutorial-practice .map-shell {
-  outline: 3px solid rgba(184, 90, 42, 0.85);
-  outline-offset: -3px;
+  outline: 4px solid rgba(184, 90, 42, 0.95);
+  outline-offset: -2px;
   border-radius: 12px;
+  box-shadow: 0 0 0 8px rgba(184, 90, 42, 0.2);
+  z-index: 3;
+  position: relative;
+}
+
+#app.tutorial-locked.tutorial-practice .map-hud {
+  pointer-events: none;
+  opacity: 0.35;
 }

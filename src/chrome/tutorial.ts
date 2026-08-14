@@ -11,6 +11,8 @@ export type TutorialHooks = {
   setRaiseTool: () => void
   setStatus: (msg: string) => void
   onComplete?: () => void
+  /** Show/hide the “paint on this map” beacon over the atlas. */
+  setMapBeacon: (on: boolean) => void
 }
 
 type Step = {
@@ -35,9 +37,9 @@ const STEPS: Step[] = [
   },
   {
     id: 'paint',
-    title: 'Paint once on the map',
-    body: 'Raise is selected. Drag on green/brown land below. Continue unlocks only after a real stroke.',
-    bullets: ['Skip the deep ocean for this try.', 'Release when done — rivers catch up.'],
+    title: 'Paint on the glowing map',
+    body: 'The orange box is the map — drag Raise on green/brown land there. This card stays out of the way at the bottom.',
+    bullets: ['Skip deep ocean for this try.', 'Release when done — then Continue unlocks.'],
     requirePaint: true,
     cta: 'I painted — finish',
   },
@@ -115,6 +117,7 @@ export function stopTutorial(markDone: boolean): void {
   if (markDone) markTutorialDone()
   active = false
   paintedOk = false
+  hooks?.setMapBeacon(false)
   hooks?.lockChrome(false, false)
   root?.remove()
   root = null
@@ -127,6 +130,7 @@ function renderStep(): void {
   const practice = !!step.requirePaint
   root.dataset.mode = practice ? 'practice' : 'card'
   hooks.lockChrome(true, practice)
+  hooks.setMapBeacon(practice)
   if (practice) hooks.setRaiseTool()
 
   const dots = STEPS.map((_, i) => {
@@ -150,7 +154,7 @@ function renderStep(): void {
       ${bullets}
       ${
         needPaint
-          ? `<p class="tutorial-wait">Drag on the map — Continue stays locked until you paint.</p>`
+          ? `<p class="tutorial-wait">↑ Drag on the orange-outlined map above. Continue unlocks after you paint.</p>`
           : ''
       }
       <div class="tutorial-actions">
@@ -177,6 +181,8 @@ function renderStep(): void {
   })
 
   hooks.setStatus(
-    practice ? 'Tutorial: drag Raise on land, then continue.' : `Tutorial: ${step.title}`,
+    practice
+      ? 'Paint on the orange-outlined map in the center — not on this card.'
+      : `Tutorial: ${step.title}`,
   )
 }
