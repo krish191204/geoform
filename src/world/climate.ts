@@ -14,7 +14,10 @@
  * River draw cutoff lives here so hydrology and the atlas stay in sync
  * (Azgaar-style: continents are never left riverless).
  */
-import type { Biome, SuitabilityResult, World } from './types'
+import type { Biome, SuitabilityResult, SuitabilityTier, World } from './types'
+
+/** Score at or above this = favorable (easy default for Suggest cities). */
+export const SUITABILITY_FAVORABLE_MIN = 0.52
 
 /** Land cells at or above this flux tint as rivers on the atlas. */
 export const RIVER_VISIBLE_MIN = 1.8
@@ -316,49 +319,71 @@ function slopeAt(world: World, x: number, y: number): number {
 }
 
 /**
- * Can people farm and drink here? Ocean = no. Peak = no. Desert / ice = bad.
- * Near a river or coast = good. This is why cities refuse to sit on water.
+ * Can people live here at all, and how hard is daily life?
+ *
+ * blocked   — ocean, alpine peak, or cliff (cannot build).
+ * marginal  — harsh but plausible (oasis, highland mine, remote trade post).
+ * favorable — river valleys, coasts, fertile plains (easy default for Suggest).
  */
 export function evaluateSuitability(world: World, x: number, y: number): SuitabilityResult {
   const { width: w, elev, seaLevel, moist, flux, biome, temp, height: h } = world
   const i = idx(w, x, y)
-  const reasons: string[] = []
+  const strengths: string[] = []
+  const challenges: string[] = []
   let score = 0.5
 
+  const blocked = (reasons: string[]): SuitabilityResult => ({
+    score: 0,
+    ok: false,
+    tier: 'blocked',
+    reasons,
+  })
+
   if (elev[i] < seaLevel) {
-    return { score: 0, ok: false, reasons: ['Open ocean — no solid ground'] }
+    return blocked(['Open ocean — no solid ground'])
   }
 
   if (elev[i] > 0.82) {
-    reasons.push('High alpine peak — too steep and cold')
-    score -= 0.55
-  } else if (elev[i] > 0.72) {
-    reasons.push('Highlands — harsh for a major city')
-    score -= 0.25
+    return blocked(['Alpine peak — too steep and cold to build on'])
   }
 
   const slope = slopeAt(world, x, y)
   if (slope > 0.08) {
-    reasons.push('Terrain too steep to settle')
-    score -= 0.35
+    return blocked(['Cliff face — too steep to build on'])
+  }
+
+  if (elev[i] > 0.72) {
+    challenges.push('Highlands — mining, fortress, or pass town')
+    score -= 0.22
+  } else if (elev[i] > 0.62) {
+    challenges.push('Upland — cooler; terrace farming or trade post')
+    score -= 0.1
+  }
+
+  if (slope > 0.05) {
+    challenges.push('Slopes — terrace or careful building')
+    score -= 0.1
   } else if (slope < 0.03) {
+    strengths.push('Gentle ground')
     score += 0.08
   }
 
   if (moist[i] < 0.18) {
-    reasons.push('Deep rain-shadow desert — scarce water')
-    score -= 0.4
+    challenges.push('Deep desert — oasis, caravan stop, or dry wells')
+    score -= 0.28
   } else if (moist[i] < 0.28) {
-    reasons.push('Arid climate')
-    score -= 0.15
+    challenges.push('Arid — dry-farming or spring town')
+    score -= 0.1
   } else if (moist[i] > 0.45) {
+    strengths.push('Reliable rainfall')
     score += 0.1
   }
 
   if (temp[i] < 0.2) {
-    reasons.push('Polar cold')
-    score -= 0.3
+    challenges.push('Cold — fishing, fur trade, or sheltered valley')
+    score -= 0.18
   } else if (temp[i] > 0.35 && temp[i] < 0.75) {
+    strengths.push('Mild climate')
     score += 0.12
   }
 
@@ -377,47 +402,52 @@ export function evaluateSuitability(world: World, x: number, y: number): Suitabi
   }
 
   if (nearRiver) {
+    strengths.push('River or stream access')
     score += 0.22
   } else if (nearCoast) {
+    strengths.push('Coast or harbor access')
     score += 0.14
+  } else if (moist[i] >= 0.22) {
+    challenges.push('Remote — rain or wells must suffice')
+    score -= 0.08
   } else {
-    reasons.push('Far from rivers and coast')
-    score -= 0.2
+    challenges.push('Far from rivers and coast')
+    score -= 0.14
   }
 
   const b = biome[i]
-  if (
-    b === 'desert' ||
-    b === 'ice' ||
-    b === 'alpine' ||
-    b.includes('desert') ||
-    b === 'ocean' ||
-    b.includes('ice')
-  ) {
-    if (
-      !reasons.some(
-        (r) =>
-          r.toLowerCase().includes('desert') ||
-          r.toLowerCase().includes('alpine') ||
-          r.toLowerCase().includes('polar') ||
-          r.toLowerCase().includes('ocean'),
-      )
-    ) {
-      reasons.push(`Biome (${b}) is hostile to settlement`)
+  if (b === 'desert' || b.includes('desert')) {
+    if (!challenges.some((r) => r.toLowerCase().includes('desert') || r.toLowerCase().includes('arid'))) {
+      challenges.push('Desert biome — water takes work')
     }
-    score -= 0.15
+    score -= 0.06
   }
-  if (b.includes('forest') || b === 'grassland' || b === 'savanna' || b === 'taiga') {
-    score += 0.1
+  if (b === 'ice' || b.includes('ice') || b === 'alpine') {
+    if (!challenges.some((r) => r.toLowerCase().includes('cold') || r.toLowerCase().includes('highland'))) {
+      challenges.push(`Biome (${b}) — harsh living`)
+    }
+    score -= 0.06
+  }
+  if (b.includes('forest') || b === 'grassland' || b === 'savanna') {
+    strengths.push('Farmland or forage nearby')
+    score += 0.08
+  } else if (b === 'taiga') {
+    challenges.push('Taiga — timber and trade, short growing season')
+    score -= 0.04
   }
 
   score = Math.max(0, Math.min(1, score))
-  const ok = score >= 0.42 && elev[i] < 0.82 && elev[i] >= seaLevel && slope <= 0.09
+  const tier: SuitabilityTier = score >= SUITABILITY_FAVORABLE_MIN ? 'favorable' : 'marginal'
+  const reasons =
+    tier === 'favorable'
+      ? strengths.length
+        ? strengths
+        : ['Favorable site']
+      : challenges.length
+        ? challenges
+        : ['Harsh but plausible']
 
-  if (ok && reasons.length === 0) reasons.push('Favorable site')
-  if (!ok && reasons.length === 0) reasons.push('Site score too low for a lasting city')
-
-  return { score, ok, reasons }
+  return { score, ok: true, tier, reasons }
 }
 
 /** Fill suitability[] for the whole map (the "where cities want to be" layer). */

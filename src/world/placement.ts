@@ -3,13 +3,13 @@
  *
  * Terrain brushes stay free — paint what you want; repair runs later.
  * Found city / Add continent are stamps. Stamps refuse nonsense:
- * cities do not float on ocean or perch on alpine peaks; continents
- * grow from the sea, not on top of existing land.
+ * cities need solid ground (not ocean, peaks, or cliffs); marginal sites are allowed.
+ * Continents grow from the sea, not on top of existing land.
  */
 
 import { evaluateSuitability } from './climate'
 import type { ContinentStyle } from './continents'
-import type { World } from './types'
+import type { SuitabilityTier, World } from './types'
 
 export interface PlacementGate {
   /** Allowed right now (or with Shift if soft). */
@@ -22,6 +22,7 @@ export interface PlacementGate {
   title: string
   detail: string
   score?: number
+  tier?: SuitabilityTier
 }
 
 function slopeAt(world: World, x: number, y: number): number {
@@ -43,7 +44,7 @@ function slopeAt(world: World, x: number, y: number): number {
 /**
  * Found city gate.
  * Hard: ocean, peak, cliff, already too close to another city.
- * Soft: desert / polar / low score — Shift can force those.
+ * Marginal and favorable sites both place without Shift.
  */
 export function gateCityPlacement(world: World, x: number, y: number): PlacementGate {
   const { width: w, height: h, elev, seaLevel } = world
@@ -89,13 +90,24 @@ export function gateCityPlacement(world: World, x: number, y: number): Placement
   }
 
   const suit = evaluateSuitability(world, x, y)
-  if (!suit.ok) {
+  if (suit.tier === 'blocked') {
     return {
       ok: false,
-      hard: false,
-      title: suit.reasons[0] ?? 'Poor site',
-      detail: `${suit.reasons.join(' · ') || 'Site score too low'}. Hold Shift to force anyway.`,
+      hard: true,
+      title: suit.reasons[0] ?? 'Blocked',
+      detail: suit.reasons.join(' · ') || 'Cannot build here.',
       score: suit.score,
+      tier: suit.tier,
+    }
+  }
+  if (suit.tier === 'marginal') {
+    return {
+      ok: true,
+      hard: false,
+      title: 'Hard site',
+      detail: `${suit.reasons.join(' · ') || 'Harsh but plausible'}.`,
+      score: suit.score,
+      tier: suit.tier,
     }
   }
   return {
@@ -104,6 +116,7 @@ export function gateCityPlacement(world: World, x: number, y: number): Placement
     title: 'Good site',
     detail: suit.reasons[0] ?? 'Favorable site',
     score: suit.score,
+    tier: suit.tier,
   }
 }
 

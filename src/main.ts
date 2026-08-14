@@ -149,7 +149,6 @@ let planet: PlanetView | null = null
 let panning = false
 let panStart = { x: 0, y: 0, panX: 0, panY: 0 }
 let spaceDown = false
-let shiftDown = false
 let climatePhase: 'idle' | 'painting' | 'updating' = 'idle'
 let pendingNewWorld: (() => void) | null = null
 let timelineAge = 0
@@ -1111,33 +1110,28 @@ const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'plateau', label: 'Plateau', desc: 'Flatten a highland', key: '6' },
   { id: 'sea', label: 'Ocean', desc: 'Paint below sea level', key: '7' },
   { id: 'land', label: 'Land', desc: 'Raise above the sea', key: '8' },
-  { id: 'city', label: 'Found city', desc: 'Only on good land — ocean & peaks blocked', key: '9' },
+  { id: 'city', label: 'Found city', desc: 'Any viable land — ocean, peaks, cliffs blocked', key: '9' },
   { id: 'razecity', label: 'Raze city', desc: 'Remove a nearby city', key: '0' },
   { id: 'inspect', label: 'Inspect', desc: 'Read cell climate & score', key: 'I' },
   { id: 'continent', label: 'Add continent', desc: 'Click open ocean only', key: 'C' },
 ]
 
 /** Live gate for the cell under the cursor (city / continent / raze). */
-function hoverPlacementGate(forceSoft = shiftDown) {
+function hoverPlacementGate() {
   if (!world || !hover) return null
   const past = gatePresentEdit(timelineAge)
   if (past && (tool === 'city' || tool === 'continent' || tool === 'razecity')) return past
-  if (tool === 'city') {
-    const gate = gateCityPlacement(world, hover.x, hover.y)
-    if (gate.ok) return gate
-    if (!gate.hard && forceSoft) return { ...gate, ok: true, title: 'Force place', detail: gate.detail }
-    return gate
-  }
+  if (tool === 'city') return gateCityPlacement(world, hover.x, hover.y)
   if (tool === 'continent') return gateContinentPlacement(world, hover.x, hover.y, continentStyle)
   if (tool === 'razecity') return gateRazeCity(world, hover.x, hover.y)
   return null
 }
 
 /** Red ring / not-allowed cursor when a stamp would be refused. */
-function syncPlacementCursor(forceSoft = shiftDown) {
+function syncPlacementCursor() {
   const canvas = document.querySelector<HTMLCanvasElement>('#map')
   if (!canvas) return
-  const gate = hoverPlacementGate(forceSoft)
+  const gate = hoverPlacementGate()
   canvas.classList.toggle('place-ok', !!gate?.ok)
   canvas.classList.toggle('place-blocked', !!gate && !gate.ok)
   if (tool === 'city' || tool === 'continent' || tool === 'razecity') {
@@ -1509,19 +1503,9 @@ function bind() {
     }
     const byKey = TOOL_DEFS.find((t) => t.key.toLowerCase() === e.key.toLowerCase())
     if (byKey) setTool(byKey.id)
-    if (e.key === 'Shift') {
-      shiftDown = true
-      syncPlacementCursor()
-      updateInspector()
-    }
   })
   window.addEventListener('keyup', (e) => {
     if (e.code === 'Space') spaceDown = false
-    if (e.key === 'Shift') {
-      shiftDown = false
-      syncPlacementCursor()
-      updateInspector()
-    }
   })
 
   const canvas = document.querySelector<HTMLCanvasElement>('#map')!
@@ -1545,7 +1529,7 @@ function bind() {
     { passive: false },
   )
 
-  const applyAt = (clientX: number, clientY: number, shiftKey: boolean) => {
+  const applyAt = (clientX: number, clientY: number) => {
     if (!world || busy) return
     if (isTutorialBlocking() && !tutorialAllowsPaint()) {
       setStatus('Finish reading the tutorial card first.')
@@ -1562,7 +1546,7 @@ function bind() {
     }
 
     if (tool === 'city') {
-      tryPlaceCity(cell.x, cell.y, shiftKey)
+      tryPlaceCity(cell.x, cell.y)
       return
     }
 
@@ -1667,7 +1651,7 @@ function bind() {
     painting = true
     lastCell = null
     canvas.setPointerCapture(e.pointerId)
-    applyAt(e.clientX, e.clientY, e.shiftKey)
+    applyAt(e.clientX, e.clientY)
   })
   canvas.addEventListener('pointermove', (e) => {
     if (panning) {
@@ -1679,7 +1663,7 @@ function bind() {
     if (!world) return
     hover = pickCell(e.clientX, e.clientY)
     if (painting && TERRAIN_TOOLS.includes(tool)) {
-      applyAt(e.clientX, e.clientY, e.shiftKey)
+      applyAt(e.clientX, e.clientY)
     } else {
       updateInspector()
       syncPlacementCursor()
@@ -1711,7 +1695,7 @@ function bind() {
       if (e.shiftKey && e.button === 0 && TERRAIN_TOOLS.includes(tool)) {
         painting = true
         lastCell = null
-        applyAt(e.clientX, e.clientY, e.shiftKey)
+        applyAt(e.clientX, e.clientY)
         return
       }
       panning = true
@@ -1720,7 +1704,7 @@ function bind() {
     })
     globeEl.addEventListener('pointermove', (e) => {
       if (painting && TERRAIN_TOOLS.includes(tool)) {
-        applyAt(e.clientX, e.clientY, e.shiftKey)
+        applyAt(e.clientX, e.clientY)
         return
       }
       if (panning) {
@@ -1733,7 +1717,7 @@ function bind() {
     })
     globeEl.addEventListener('pointerup', (e) => {
       if (!planetMoved && !painting && e.button === 0) {
-        applyAt(e.clientX, e.clientY, e.shiftKey)
+        applyAt(e.clientX, e.clientY)
       }
       planet?.onPointerUp()
       endPointer()
@@ -1841,7 +1825,7 @@ function placeContinentAuto() {
   updateInspector()
 }
 
-function tryPlaceCity(x: number, y: number, force: boolean) {
+function tryPlaceCity(x: number, y: number) {
   if (!world) return
   const past = gatePresentEdit(timelineAge)
   if (past) {
@@ -1850,18 +1834,14 @@ function tryPlaceCity(x: number, y: number, force: boolean) {
   }
   const gate = gateCityPlacement(world, x, y)
   if (!gate.ok) {
-    if (gate.hard || !force) {
-      showCoach({
-        title: `Blocked: ${gate.title}`,
-        tip: gate.hard
-          ? gate.detail
-          : `${gate.detail} Score ${((gate.score ?? 0) * 100) | 0}%. Hold Shift and click to force a poor site.`,
-        next: 'Use the Settle look (green = good). Ocean, peaks, and cliffs will always refuse.',
-        tone: 'warn',
-      })
-      updateInspector()
-      return
-    }
+    showCoach({
+      title: `Blocked: ${gate.title}`,
+      tip: gate.detail,
+      next: 'Ocean, alpine peaks, and cliff faces cannot hold a city. Pick gentler land.',
+      tone: 'warn',
+    })
+    updateInspector()
+    return
   }
   const result = evaluateSuitability(world, x, y)
   beginStroke('Found city', {
@@ -1873,10 +1853,12 @@ function tryPlaceCity(x: number, y: number, force: boolean) {
   world.cities.push({ x, y, name, score: result.score })
   announceChange(
     `You founded ${name}`,
-    force && !result.ok
-      ? `Forced onto a poor site (score ${(result.score * 100) | 0}%). Land and weather are unchanged.`
-      : `Suitability ${(result.score * 100) | 0}%. Land and weather are unchanged.`,
-    'Rename it in the city list. Found more on green Settle-look land.',
+    result.tier === 'favorable'
+      ? `Favorable site (${(result.score * 100) | 0}%). Land and weather are unchanged.`
+      : `Hard site (${(result.score * 100) | 0}%) — harsh but plausible. Land and weather are unchanged.`,
+    result.tier === 'favorable'
+      ? 'Rename it in the city list. Found more on green Settle-look land.'
+      : 'Rename it in the city list. Amber Settle cells are tough but valid towns.',
   )
   updateInspector()
   updateCities()
@@ -1952,8 +1934,8 @@ function updateInspector() {
   const gate = hoverPlacementGate()
   const placeBanner =
     gate && (tool === 'city' || tool === 'continent' || tool === 'razecity')
-      ? `<div class="place-banner ${gate.ok ? 'ok' : gate.hard ? 'hard' : 'soft'}">
-          <strong>${gate.ok ? 'Can place' : gate.hard ? 'Blocked' : 'Poor site'}</strong>
+      ? `<div class="place-banner ${gate.ok ? (gate.tier === 'marginal' ? 'soft' : 'ok') : 'hard'}">
+          <strong>${gate.ok ? (gate.tier === 'marginal' ? 'Can work' : 'Good site') : 'Blocked'}</strong>
           <span>${gate.title}${gate.score != null ? ` · ${(gate.score * 100) | 0}%` : ''}</span>
           <small>${gate.detail}</small>
         </div>`
@@ -1963,7 +1945,7 @@ function updateInspector() {
     <div class="inspect-head">
       <strong>${x}, ${y}</strong>
       <span class="pill ${above ? 'land' : 'sea'}">${above ? 'Land' : 'Ocean'}</span>
-      <span class="pill score ${suit.ok ? 'ok' : 'no'}">${(suit.score * 100) | 0}%</span>
+      <span class="pill score ${suit.tier === 'favorable' ? 'ok' : suit.tier === 'marginal' ? 'warn' : 'no'}">${(suit.score * 100) | 0}%</span>
     </div>
     <dl>
       <dt>Elevation</dt><dd>${(src.elev[i] * 100) | 0}%</dd>
@@ -1977,7 +1959,12 @@ function updateInspector() {
     <ul class="reasons">
       ${
         above
-          ? suit.reasons.map((r) => `<li class="${suit.ok ? 'good' : 'bad'}">${r}</li>`).join('')
+          ? suit.reasons
+              .map(
+                (r) =>
+                  `<li class="${suit.tier === 'favorable' ? 'good' : suit.tier === 'marginal' ? 'warn' : 'bad'}">${r}</li>`,
+              )
+              .join('')
           : '<li>Open water</li>'
       }
     </ul>

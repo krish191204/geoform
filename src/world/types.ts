@@ -48,10 +48,15 @@ export interface City {
   score: number
 }
 
+/** Settlement viability — not one ideal biome, but can vs cannot. */
+export type SuitabilityTier = 'blocked' | 'marginal' | 'favorable'
+
 /** Why a cell can or cannot host a city. */
 export interface SuitabilityResult {
   score: number
+  /** True when tier is marginal or favorable (can place without Shift). */
   ok: boolean
+  tier: SuitabilityTier
   reasons: string[]
 }
 

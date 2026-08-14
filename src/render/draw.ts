@@ -60,9 +60,9 @@ function moistureColor(m: number): [number, number, number] {
 }
 
 function suitColor(s: number): [number, number, number] {
-  if (s < 0.35) return mix([120, 48, 40], [170, 90, 40], s / 0.35)
-  if (s < 0.55) return mix([170, 90, 40], [170, 150, 50], (s - 0.35) / 0.2)
-  return mix([170, 150, 50], [50, 140, 70], (s - 0.55) / 0.45)
+  if (s < 0.28) return mix([120, 48, 40], [150, 70, 38], s / 0.28)
+  if (s < 0.52) return mix([150, 70, 38], [170, 150, 50], (s - 0.28) / 0.24)
+  return mix([170, 150, 50], [50, 140, 70], (s - 0.52) / 0.48)
 }
 
 const PLATE_PALETTE: [number, number, number][] = [

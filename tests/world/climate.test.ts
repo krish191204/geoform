@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ensureDrainage,
   ensureRiverPresence,
+  evaluateSuitability,
   RIVER_VISIBLE_MIN,
   recomputeClimate,
   recomputeDerived,
@@ -193,6 +194,56 @@ describe('visible rivers on continents', () => {
       if (world.elev[i] >= world.seaLevel) maxF = Math.max(maxF, world.flux[i])
     }
     expect(maxF).toBeGreaterThanOrEqual(RIVER_VISIBLE_MIN)
+  })
+})
+
+describe('settlement suitability tiers', () => {
+  it('blocks ocean, peaks, and cliffs', () => {
+    const world = blankWorld(24, 16, 0.4)
+    world.elev.fill(0.55)
+    world.moist.fill(0.5)
+    world.temp.fill(0.55)
+    world.flux.fill(2)
+    world.biome.fill('grassland')
+
+    expect(evaluateSuitability(world, 4, 4).tier).toBe('favorable')
+
+    world.elev[4 * 24 + 4] = 0.2
+    expect(evaluateSuitability(world, 4, 4).tier).toBe('blocked')
+
+    world.elev.fill(0.55)
+    world.elev[8 * 24 + 8] = 0.9
+    expect(evaluateSuitability(world, 8, 8).tier).toBe('blocked')
+
+    world.elev.fill(0.55)
+    world.elev[10 * 24 + 10] = 0.55
+    world.elev[10 * 24 + 11] = 0.82
+    expect(evaluateSuitability(world, 10, 10).tier).toBe('blocked')
+  })
+
+  it('marks harsh desert land as marginal but placeable', () => {
+    const world = blankWorld(24, 16, 0.4)
+    world.elev.fill(0.55)
+    world.moist.fill(0.12)
+    world.temp.fill(0.55)
+    world.flux.fill(0.2)
+    world.biome.fill('desert')
+    const site = evaluateSuitability(world, 12, 8)
+    expect(site.tier).toBe('marginal')
+    expect(site.ok).toBe(true)
+  })
+
+  it('marks river valleys as favorable', () => {
+    const world = blankWorld(24, 16, 0.4)
+    world.elev.fill(0.55)
+    world.moist.fill(0.5)
+    world.temp.fill(0.55)
+    world.flux.fill(6)
+    world.biome.fill('grassland')
+    const site = evaluateSuitability(world, 12, 8)
+    expect(site.tier).toBe('favorable')
+    expect(site.ok).toBe(true)
+    expect(site.score).toBeGreaterThanOrEqual(0.52)
   })
 })
 

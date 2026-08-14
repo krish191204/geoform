@@ -69,8 +69,8 @@ const TOOL_COACH: Record<Tool, CoachMessage> = {
   },
   city: {
     title: 'Found city',
-    tip: 'Click gentle land near coast or rivers. Ocean, peaks, and cliffs are blocked.',
-    next: 'Red cursor = blocked. Green = ok. Shift-click forces a poor site.',
+    tip: 'Click any viable land. Green Settle = easy living; amber = harsh but plausible.',
+    next: 'Only ocean, alpine peaks, and cliff faces are blocked.',
     tone: 'go',
   },
   razecity: {
@@ -132,8 +132,8 @@ const LAYER_COACH: Record<string, CoachMessage> = {
   },
   suitability: {
     title: 'Settle look',
-    tip: 'Green = good city land. Red = ocean, peaks, deserts, cliffs.',
-    next: 'Found city on green. The tool still blocks nonsense clicks.',
+    tip: 'Green = favorable towns. Amber = can work with friction. Red = ocean, peaks, cliffs.',
+    next: 'Found city on green or amber. Only impossible terrain is blocked.',
     tone: 'go',
   },
   satellite: {

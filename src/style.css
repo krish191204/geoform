@@ -738,6 +738,11 @@ button.primary:hover {
   background: rgba(31, 90, 102, 0.18);
 }
 
+.pill.score.warn {
+  background: rgba(184, 130, 40, 0.18);
+  color: #5a3a10;
+}
+
 .pill.score.ok {
   background: rgba(74, 107, 69, 0.22);
 }
@@ -777,6 +782,11 @@ button.primary:hover {
   border-radius: 8px;
   background: rgba(28, 34, 28, 0.06);
   font-size: 0.86rem;
+}
+
+.reasons li.warn {
+  background: rgba(184, 130, 40, 0.14);
+  color: #6a4810;
 }
 
 .reasons li.bad {
