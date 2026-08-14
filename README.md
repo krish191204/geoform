@@ -4,7 +4,7 @@ Geoform is a browser worldbuilding app. Paint a heightfield; climate, rivers, an
 
 **Split:** **Python** builds New world and authoritative climate (WorldEngine API). **TypeScript** is the paint program — brushes, undo, canvas, instant preview. If Python is offline, Local TypeScript generates the planet instead.
 
-**New here?** Read [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md) first.
+**New here?** Read [`HOW_IT_WORKS.md`](HOW_IT_WORKS.md) first. It explains the grid, land vs sea, and which file does what, in plain English. The source is also commented that way.
 
 Pages:
 
