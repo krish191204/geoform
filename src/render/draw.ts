@@ -802,13 +802,18 @@ export class MapRenderer {
     // During a paint stroke, patchRegion updates this.base — skip full rebuild until release.
     if (!opts.painting) {
       const key = `${world.seed}|${hashWorld(world)}|${opts.layer}|${opts.showRivers}|${opts.riversMuted ? 1 : 0}|${scale}`
-      if (key !== this.cacheKey || !this.base) {
+      if (
+        key !== this.cacheKey ||
+        !this.base ||
+        this.base.width !== cw ||
+        this.base.height !== ch
+      ) {
         this.rebuildBase(world, opts, 0)
         this.cacheKey = key
         this.hazardKey = ''
         this.hazardLayer = null
       }
-    } else if (!this.base) {
+    } else if (!this.base || this.base.width !== cw || this.base.height !== ch) {
       this.rebuildBase(world, opts, 0)
     }
 

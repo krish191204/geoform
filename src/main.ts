@@ -192,8 +192,6 @@ let showTradeRoutes = false
 let settlementCoveragePct = 35
 /** Keep the loading overlay up until the first atlas bitmap is drawn. */
 let mapPaintPending = false
-/** First boot paint uses a low-res preview, then upgrades in the background. */
-let mapPaintPreview = false
 const history = new EditHistory()
 const renderer = new MapRenderer()
 let raf = 0
@@ -384,9 +382,9 @@ function applyWorld(next: World, message: string) {
     refreshGeography(next, { sculpt: false })
   }
   mapPaintPending = true
-  mapPaintPreview = true
   setBusy(true, 'Rendering map…')
   invalidateRenderer()
+  queueMicrotask(() => requestRepaint())
   announceChange(
     'A new planet is on the map',
     `${message} This replaced the previous world. Rivers and plants were calculated from the new heights — they were not drawn by hand.`,
@@ -1137,7 +1135,6 @@ function loadLocalWorld(nextSeed: number, note?: string) {
     setClimatePhase('idle')
   } catch (err) {
     mapPaintPending = false
-    mapPaintPreview = false
     setBusy(false)
     throw err
   }
@@ -2345,18 +2342,18 @@ function startLoop() {
 }
 
 /** Raster scale grows with zoom so scroll-in stays sharp (not CSS-upscaled blur). */
-function rasterScale(w: World, preview = mapPaintPreview): number {
-  return atlasRasterScaleForZoom(w.width, w.height, mapQuality, viewZoom, preview)
+function rasterScale(w: World): number {
+  return atlasRasterScaleForZoom(w.width, w.height, mapQuality, viewZoom)
 }
 
-function atlasDrawOpts(preview = mapPaintPreview) {
+function atlasDrawOpts() {
   const src = displayWorld()
   return {
     layer,
     showRivers: true,
     showCities: timelineAge < 8,
     showTradeRoutes: showTradeRoutes && timelineAge < 8,
-    scale: src ? rasterScale(src, preview) : 4,
+    scale: src ? rasterScale(src) : 4,
     hover,
     brush,
     tool,
@@ -2368,11 +2365,6 @@ function atlasDrawOpts(preview = mapPaintPreview) {
 
 function finishAtlasPaint() {
   if (!mapPaintPending) return
-  if (mapPaintPreview) {
-    mapPaintPreview = false
-    requestRepaint()
-    return
-  }
   mapPaintPending = false
   setBusy(false)
 }
@@ -2380,10 +2372,7 @@ function finishAtlasPaint() {
 /** Draw the current world onto the canvas when a frame is requested. */
 function paint() {
   const src = displayWorld()
-  if (!src) {
-    if (mapPaintPending) finishAtlasPaint()
-    return
-  }
+  if (!src) return
   if (viewMode !== 'planet') fitAtlasCanvas()
   if (viewMode === 'planet') {
     if (!planet) return
