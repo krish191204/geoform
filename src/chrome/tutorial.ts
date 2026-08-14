@@ -1,15 +1,16 @@
 /**
- * Mandatory first-run tutorial. Blocks the editor until the user finishes
- * (and proves they can paint once). Completion is stored in localStorage.
+ * Short mandatory first-run tutorial, then the live coach takes over.
+ * Completion is stored in localStorage (v2 — older completions re-show once).
  */
 import './tutorial.css'
 
-const STORAGE_KEY = 'geoform.tutorial.v1.done'
+const STORAGE_KEY = 'geoform.tutorial.v2.done'
 
 export type TutorialHooks = {
   lockChrome: (locked: boolean, practice: boolean) => void
   setRaiseTool: () => void
   setStatus: (msg: string) => void
+  onComplete?: () => void
 }
 
 type Step = {
@@ -17,7 +18,6 @@ type Step = {
   title: string
   body: string
   bullets?: string[]
-  /** User must paint a stroke before Next unlocks */
   requirePaint?: boolean
   cta?: string
 }
@@ -25,56 +25,27 @@ type Step = {
 const STEPS: Step[] = [
   {
     id: 'welcome',
-    title: 'Welcome to Geoform',
-    body: 'This is a paint program for planets. You change the land. Climate, rivers, and biomes follow from the heights.',
+    title: '30-second orientation',
+    body: 'Geoform is a paint program for planets. You change height. Climate and rivers follow. The yellow coach box always tells you what to do next.',
     bullets: [
-      'You do not draw rivers by hand — they flow downhill from rain.',
-      'Barren flat continents are not a goal. New worlds already have mountains, uplands, and streams.',
+      'You do not draw rivers by hand — they flow downhill.',
+      'Every tool and layer explains itself when you click it.',
     ],
-    cta: 'Got it',
-  },
-  {
-    id: 'cause',
-    title: 'Height is the cause',
-    body: 'Raise land → cooler highlands and wet windward slopes. Carve valleys → rivers gather. The map is not decoration; it is physics-lite.',
-    bullets: [
-      'Relief layer = heights (and river tint).',
-      'Biome / rain layers = weather that came from those heights.',
-    ],
-    cta: 'Next',
+    cta: 'Next — try painting',
   },
   {
     id: 'paint',
-    title: 'Your turn: paint a ridge',
-    body: 'The Raise tool is selected. Drag on land on the map below. Hold and move — you should see the terrain change while you drag.',
-    bullets: [
-      'Paint on green/brown land, not deep ocean.',
-      'Release when done — climate and rivers catch up a moment later.',
-    ],
+    title: 'Paint once on the map',
+    body: 'Raise is selected. Drag on green/brown land below. Continue unlocks only after a real stroke.',
+    bullets: ['Skip the deep ocean for this try.', 'Release when done — rivers catch up.'],
     requirePaint: true,
-    cta: 'I painted — continue',
-  },
-  {
-    id: 'rivers',
-    title: 'Rivers appear for free',
-    body: 'Blue lines are streams. Thin = tributaries, thicker = main stems. If you raise a mountain, rain and drainage will rewrite after you release the mouse.',
-    cta: 'Next',
-  },
-  {
-    id: 'cities',
-    title: 'Cities need good sites',
-    body: 'Use the City tool on coasts, rivers, and gentle land. The app blocks nonsense placements (ocean peaks, sheer cliffs). Shift-click can force a bad site if you insist.',
-    cta: 'Next',
+    cta: 'I painted — finish',
   },
   {
     id: 'done',
-    title: 'You’re clear to build',
-    body: 'New world regenerates the planet. World menu has seed, import/export, and science backend. You can replay this tutorial anytime from World → Replay tutorial.',
-    bullets: [
-      'Python science (if running) builds New world; brushes always paint in the browser.',
-      'Undo is one stroke at a time (Z).',
-    ],
-    cta: 'Enter the editor',
+    title: 'You’re in',
+    body: 'Watch the coach box when you pick tools, layers, land %, or New world. Replay anytime: World → Replay tutorial.',
+    cta: 'Start building',
   },
 ]
 
@@ -108,22 +79,19 @@ export function clearTutorialDone(): void {
   }
 }
 
-/** True while the mandatory tutorial owns the UI. */
 export function isTutorialBlocking(): boolean {
   return active
 }
 
-/** True only on the paint practice step — map strokes are allowed. */
 export function tutorialAllowsPaint(): boolean {
   return active && STEPS[stepIndex]?.requirePaint === true
 }
 
-/** Call from endStroke when the user finished a terrain drag. */
 export function tutorialNotifyStrokeEnd(): void {
   if (!active || !STEPS[stepIndex]?.requirePaint || paintedOk) return
   paintedOk = true
   renderStep()
-  hooks?.setStatus('Nice — that stroke counts. Continue the tutorial.')
+  hooks?.setStatus('Stroke counted — continue the tutorial.')
 }
 
 export function startTutorial(mount: HTMLElement, nextHooks: TutorialHooks): void {
@@ -171,24 +139,23 @@ function renderStep(): void {
     : ''
 
   const needPaint = step.requirePaint && !paintedOk
-  const ctaLabel = step.cta ?? 'Next'
   const isLast = stepIndex >= STEPS.length - 1
 
   root.innerHTML = `
     <div class="tutorial-card">
-      <p class="tutorial-kicker">Tutorial · ${stepIndex + 1} / ${STEPS.length}</p>
+      <p class="tutorial-kicker">Quick start · ${stepIndex + 1} / ${STEPS.length}</p>
       <div class="tutorial-progress" aria-hidden="true">${dots}</div>
       <h2 id="tutorialTitle">${step.title}</h2>
       <p>${step.body}</p>
       ${bullets}
       ${
         needPaint
-          ? `<p class="tutorial-wait">Drag on the map first — Continue stays locked until you paint.</p>`
+          ? `<p class="tutorial-wait">Drag on the map — Continue stays locked until you paint.</p>`
           : ''
       }
       <div class="tutorial-actions">
         <button type="button" class="tutorial-next" id="tutorialNext" ${needPaint ? 'disabled' : ''}>
-          ${isLast ? ctaLabel : ctaLabel}
+          ${step.cta ?? (isLast ? 'Start building' : 'Next')}
         </button>
       </div>
     </div>
@@ -197,8 +164,11 @@ function renderStep(): void {
   root.querySelector('#tutorialNext')?.addEventListener('click', () => {
     if (STEPS[stepIndex]?.requirePaint && !paintedOk) return
     if (stepIndex >= STEPS.length - 1) {
+      const done = hooks?.onComplete
+      const status = hooks?.setStatus
       stopTutorial(true)
-      hooks?.setStatus('Tutorial done — raise land, found cities, hit New world when you want a fresh planet.')
+      status?.('Coach is on — click any tool and read the yellow box.')
+      done?.()
       return
     }
     stepIndex++
@@ -207,8 +177,6 @@ function renderStep(): void {
   })
 
   hooks.setStatus(
-    practice
-      ? 'Tutorial: drag Raise on land, then continue.'
-      : `Tutorial: ${step.title}`,
+    practice ? 'Tutorial: drag Raise on land, then continue.' : `Tutorial: ${step.title}`,
   )
 }

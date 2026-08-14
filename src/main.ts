@@ -17,6 +17,18 @@
 import './style.css'
 import { navHtml } from './chrome/nav'
 import {
+  coachContinentStyle,
+  coachEngine,
+  coachLandRatio,
+  coachLayer,
+  coachMass,
+  coachTimeline,
+  coachTool,
+  coachView,
+  paintCoach,
+  type CoachMessage,
+} from './chrome/coach'
+import {
   clearTutorialDone,
   isTutorialBlocking,
   isTutorialDone,
@@ -157,6 +169,11 @@ function setStatus(msg: string) {
   if (el) el.textContent = status
 }
 
+function showCoach(msg: CoachMessage) {
+  paintCoach(document.querySelector('#coach'), msg)
+  setStatus(`${msg.title}: ${msg.tip}`)
+}
+
 /** Swap in a new planet (New world, Load, undo). Reset the deep-time slider to Present. */
 function applyWorld(next: World, message: string) {
   world = next
@@ -182,6 +199,12 @@ function applyWorld(next: World, message: string) {
   }
   renderer.invalidate()
   setStatus(message)
+  showCoach({
+    title: 'World loaded',
+    tip: message,
+    next: 'Pick Raise or Ridge and drag on land. Watch rivers after you release.',
+    tone: 'ok',
+  })
   setClimatePhase('idle')
   updateInspector()
   updateGeoFlags()
@@ -247,10 +270,10 @@ function setViewMode(mode: 'atlas' | 'planet') {
     if (isLayerLook(layer)) globeLook = layer
     planet?.layout()
     renderer.invalidate()
-    setStatus('Planet — drag to spin, drag up/down to tilt, scroll to zoom. Looks change the surface.')
+    showCoach(coachView('planet'))
   } else {
     if (isLayerLook(globeLook)) layer = globeLook
-    setStatus('Atlas view')
+    showCoach(coachView('atlas'))
   }
   renderLayerChips()
   applyViewTransform()
@@ -300,6 +323,7 @@ function renderLayerChips() {
       }
       renderer.invalidate()
       planet?.setLook(globeLook)
+      showCoach(coachLayer(viewMode === 'planet' ? globeLook : layer))
       renderLayerChips()
     })
   })
@@ -347,13 +371,13 @@ function setTimelineAge(age: number) {
   if (!world || timelineAge < 0.5) {
     timelineView = null
     renderer.invalidate()
-    if (world) setStatus('Present — mountains, rivers, and climate follow the continents.')
+    showCoach(coachTimeline(0))
     return
   }
   timelineView = reconstructPast(world, timelineAge)
   renderer.invalidate()
   updateInspector()
-  setStatus(`${Math.round(timelineAge)} Ma — reconstructed from today’s plates.`)
+  showCoach(coachTimeline(timelineAge))
 }
 
 function scheduleTimeline(age: number) {
@@ -674,6 +698,8 @@ function renderShell() {
       </section>
 
       <aside class="panel inspector">
+        <h2>Coach</h2>
+        <div id="coach" role="status" aria-live="polite"></div>
         <h2>Inspector</h2>
         <div id="geoFlags" class="geo-flags"></div>
         <div id="inspect"></div>
@@ -698,11 +724,15 @@ function tutorialHooks() {
     },
     setRaiseTool: () => setTool('raise'),
     setStatus,
+    onComplete: () => showCoach(coachTool(tool)),
   }
 }
 
 function beginTutorialIfNeeded() {
-  if (isTutorialDone()) return
+  if (isTutorialDone()) {
+    showCoach(coachTool(tool))
+    return
+  }
   setMapHint(false)
   startTutorial(document.body, tutorialHooks())
 }
@@ -991,6 +1021,7 @@ function setTool(next: Tool) {
   if (hud && def) hud.innerHTML = `${TOOL_ICONS[def.id]}<span>${def.label}</span>`
   syncContinentHint()
   syncPlacementCursor()
+  showCoach(coachTool(tool))
 }
 
 const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
@@ -1079,6 +1110,8 @@ function bind() {
         btn.classList.add('active')
         syncContinentHint()
         syncPlacementCursor()
+        const def = CONTINENT_STYLES.find((s) => s.id === continentStyle)
+        if (def) showCoach(coachContinentStyle(def.id, def.label, def.desc))
       })
     })
   }
@@ -1100,11 +1133,8 @@ function bind() {
         updateGeoFlags()
         scheduleAutosave()
         const opt = CONTINENT_MASS_OPTIONS.find((s) => s.id === continentMass)
-        setStatus(
-          continentMass === 'islands'
-            ? 'Island world — next New world will speckle. Paint still does what you do.'
-            : `${opt?.label ?? 'Full continents'} — next New world grows large landmasses.`,
-        )
+        showCoach(coachMass(continentMass))
+        if (opt) syncContinentHint()
       })
     })
   }
@@ -1130,36 +1160,61 @@ function bind() {
       if (!(await apiHealthy())) {
         engineChoice = 'local'
         syncEngineUi('Python API offline — stay on Local, or run npm run dev:api.')
-        setStatus('Python science offline — using Local preview.')
+        showCoach({
+          ...coachEngine('local'),
+          title: 'Python offline',
+          tip: 'API is not running. Staying on Local preview.',
+          next: 'Run npm run dev:api (or npm run dev:all), then pick Python science again.',
+          tone: 'warn',
+        })
         return
       }
       engineChoice = 'worldengine'
       syncEngineUi()
-      setStatus('Python science ready — New world & Refresh use the API. Paint stays local.')
+      showCoach(coachEngine('worldengine'))
       return
     }
     engineChoice = 'local'
     syncEngineUi()
-    setStatus('Local preview — New world runs entirely in the browser.')
+    showCoach(coachEngine('local'))
   })
 
   document.querySelector('#brush')!.addEventListener('input', (e) => {
     brush = Number((e.target as HTMLInputElement).value)
     document.querySelector('#brushVal')!.textContent = String(brush)
+    showCoach({
+      title: `Brush size ${brush}`,
+      tip: 'Bigger brush covers more cells each dab. Start medium; zoom in for coast detail.',
+      next: 'Drag on the map with Raise or Ridge.',
+      tone: 'tip',
+    })
   })
   document.querySelector('#strength')!.addEventListener('input', (e) => {
     strength = Number((e.target as HTMLInputElement).value) / 100
     document.querySelector('#strengthVal')!.textContent = String(Math.round(strength * 100))
+    showCoach({
+      title: `Strength ${Math.round(strength * 100)}`,
+      tip: 'How hard each dab pushes height. Higher = faster mountains (and easier mistakes).',
+      next: 'Undo (Z) reverts a whole stroke if you overshoot.',
+      tone: strength > 0.15 ? 'warn' : 'tip',
+    })
   })
   document.querySelector('#softness')!.addEventListener('input', (e) => {
     softness = Number((e.target as HTMLInputElement).value) / 100
     document.querySelector('#softVal')!.textContent = String(Math.round(softness * 100))
+    showCoach({
+      title: `Softness ${Math.round(softness * 100)}%`,
+      tip: 'Soft edges blend into neighbors. Hard edges stamp sharper rings.',
+      next: 'Use Smooth afterward if a coast looks like a cookie cutter.',
+      tone: 'tip',
+    })
   })
   const landInput = document.querySelector<HTMLInputElement>('#landRatio')
   landInput?.addEventListener('input', (e) => {
     landRatio = Number((e.target as HTMLInputElement).value) / 100
     document.querySelector('#landVal')!.textContent = String(Math.round(landRatio * 100))
     document.querySelector('#waterVal')!.textContent = String(Math.round((1 - landRatio) * 100))
+    showCoach(coachLandRatio(Math.round(landRatio * 100)))
     if (!world || busy) return
     if (!strokeActive) beginStroke('Land / water')
     applyLandRatio(world, landRatio)
@@ -1172,7 +1227,7 @@ function bind() {
   landInput?.addEventListener('change', () => {
     if (!world) return
     endStroke()
-    setStatus(`Land ${Math.round(landRatio * 100)}% · water ${Math.round((1 - landRatio) * 100)}%`)
+    showCoach(coachLandRatio(Math.round(landRatio * 100)))
   })
 
   const timeInput = document.querySelector<HTMLInputElement>('#timeline')
@@ -1202,14 +1257,29 @@ function bind() {
             ensurePlateMotion(world)
             ensureVisibleHydrology(world)
             recomputeSuitability(world)
-            setStatus('Python climate refreshed — heights kept.')
+            showCoach({
+              title: 'Climate refreshed',
+              tip: 'Python rebuilt rain and rivers. Your painted heights were kept.',
+              next: 'Check Relief for blue streams, or Biome for plant belts.',
+              tone: 'ok',
+            })
           } else {
             recomputeDerived(world!)
-            setStatus('API offline — local climate from current heights.')
+            showCoach({
+              title: 'Local climate',
+              tip: 'Python API offline — rebuilt rivers in the browser from current heights.',
+              next: 'Start npm run dev:api if you want Python science again.',
+              tone: 'warn',
+            })
           }
         } catch {
           recomputeDerived(world!)
-          setStatus('Used local climate after Python failure.')
+          showCoach({
+            title: 'Local climate fallback',
+            tip: 'Python refresh failed — used browser climate instead.',
+            next: 'Check that the API is running on :8765.',
+            tone: 'warn',
+          })
         }
         renderer.invalidate()
         setClimatePhase('idle')
@@ -1221,7 +1291,12 @@ function bind() {
     refreshGeography(world, { sculpt: true })
     renderer.invalidate()
     setClimatePhase('idle')
-    setStatus('Mountains, rivers, and climate rebuilt from the continents.')
+    showCoach({
+      title: 'Mountains & climate rebuilt',
+      tip: 'Plate-edge ranges and inland uplands refreshed, then rivers from the new heights.',
+      next: 'Switch to Relief — you should see ridges and blue streams.',
+      tone: 'ok',
+    })
     updateInspector()
     scheduleAutosave()
   })
@@ -1235,7 +1310,21 @@ function bind() {
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
-    setStatus(added.length ? `Suggested ${added.length} cities on good sites.` : 'No strong sites found — try Settle layer.')
+    showCoach(
+      added.length
+        ? {
+            title: `Suggested ${added.length} cities`,
+            tip: 'Dropped on high-suitability cells near coast or rivers.',
+            next: 'Open Settle layer to see the green sites, or Found city yourself.',
+            tone: 'ok',
+          }
+        : {
+            title: 'No strong sites',
+            tip: 'Land may be too harsh, dry, or steep right now.',
+            next: 'Switch to Settle layer, or Land/Raise gentler coasts, then try again.',
+            tone: 'warn',
+          },
+    )
   })
   document.querySelector('#clearCities')!.addEventListener('click', () => {
     if (!world?.cities.length) return
