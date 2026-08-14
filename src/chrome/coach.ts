@@ -69,8 +69,8 @@ const TOOL_COACH: Record<Tool, CoachMessage> = {
   },
   city: {
     title: 'Found city',
-    tip: 'Click any viable land. Green Settle = easy living; amber = harsh but plausible.',
-    next: 'Only ocean, alpine peaks, and cliff faces are blocked.',
+    tip: 'Click viable land. The town gets a role from geography — farm, port, mine, etc.',
+    next: 'Use Suggest settlements for capitals, farmlands, and specialized towns.',
     tone: 'go',
   },
   razecity: {

@@ -40,12 +40,24 @@ export type Tool =
 /** A biome is just a label like "ocean" or "tropical rain forest". */
 export type Biome = string
 
+/** What a settlement primarily does economically. */
+export type SettlementRole =
+  | 'seat_of_power'
+  | 'farmland'
+  | 'fishing'
+  | 'mining'
+  | 'hunting'
+  | 'trade'
+  | 'pastoral'
+
 export interface City {
   x: number
   y: number
   name: string
   /** 0 = terrible place to live, 1 = great. */
   score: number
+  /** What this settlement does — agriculture, mining, fishing, etc. */
+  role?: SettlementRole
 }
 
 /** Settlement viability — not one ideal biome, but can vs cannot. */

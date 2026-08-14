@@ -78,8 +78,24 @@ import {
   brushSeaLevel,
   brushSmooth,
   removeNearestCity,
-  suggestCities,
 } from './world/tools'
+import {
+  describeSettlementRole,
+  formatSettlementRole,
+  inferSettlementRole,
+  resolveCityRole,
+  SETTLEMENT_ROLES,
+  SETTLEMENT_ROLE_LABEL,
+  suggestSettlements,
+  type SettlementPlan,
+} from './world/settlements'
+import {
+  atlasRasterScale,
+  loadMapQuality,
+  QUALITY_PRESETS,
+  saveMapQuality,
+  type MapQuality,
+} from './world/quality'
 import { addContinent, findOceanSite, CONTINENT_STYLES, type ContinentStyle } from './world/continents'
 import { expandWorld, padsForZoomOut } from './world/expand'
 import { chewStraightCoasts } from './world/coasts'
@@ -99,8 +115,12 @@ import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { PlanetView } from './render/globe'
 import type { Layer, Tool, World } from './world/types'
 
-const WIDTH = 320
-const HEIGHT = 160
+let mapQuality: MapQuality = loadMapQuality()
+
+function worldSize() {
+  const p = QUALITY_PRESETS[mapQuality]
+  return { width: p.width, height: p.height }
+}
 
 type EngineChoice = 'local' | 'worldengine'
 
@@ -696,14 +716,38 @@ function renderShell() {
         </div>
         <p class="hint" id="continentHint">Pick a style, then use Add continent on the map — or Auto-place in open ocean.</p>
 
+        <h3>Quality</h3>
+        <label class="quality-row">
+          Map detail
+          <select id="mapQuality" aria-label="Map quality for new worlds">
+            ${Object.values(QUALITY_PRESETS)
+              .map(
+                (p) =>
+                  `<option value="${p.id}" ${p.id === mapQuality ? 'selected' : ''}>${p.label} · ${p.width}×${p.height}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+        <p class="hint">Higher detail = sharper atlas and 3D globe on the next New world. Existing saves keep their size.</p>
+
+        <h3>Settlements</h3>
+        <label class="settlement-suggest-row">
+          Suggest
+          <select id="settlementPlan" aria-label="Settlement type to suggest">
+            <option value="mix">Full mix (recommended)</option>
+            ${SETTLEMENT_ROLES.map((r) => `<option value="${r}">${SETTLEMENT_ROLE_LABEL[r]}</option>`).join('')}
+          </select>
+        </label>
+        <div class="action-row">
+          <button type="button" id="suggestSettlements">Suggest settlements</button>
+          <button type="button" id="clearCities">Clear all</button>
+        </div>
+        <p class="hint">Picks seats of power, farmlands, ports, mines, and more from geography. Each town gets a role in the city list.</p>
+
         <h3>Actions</h3>
         <div class="action-row">
           <button type="button" id="undo" title="Ctrl/⌘ Z">Undo</button>
           <button type="button" id="redo" title="Ctrl/⌘ Shift Z">Redo</button>
-        </div>
-        <div class="action-row">
-          <button type="button" id="suggestCities">Suggest cities</button>
-          <button type="button" id="clearCities">Clear cities</button>
         </div>
         <div class="action-row">
           <button type="button" id="resetView">Reset view</button>
@@ -854,7 +898,8 @@ function loadLocalWorld(nextSeed: number, note?: string) {
   setBusy(true, 'Raising continents…')
   setStatus('Generating local world…')
   try {
-    const next = generateWorld(WIDTH, HEIGHT, nextSeed, landRatio, continentMass)
+    const { width, height } = worldSize()
+    const next = generateWorld(width, height, nextSeed, landRatio, continentMass)
     clearAutosave()
     applyWorld(
       next,
@@ -923,7 +968,8 @@ async function loadWorld(nextSeed: number) {
   setStatus('Asking Python science…')
   try {
     if (!(await apiHealthy())) throw new Error('API offline')
-    const next = await fetchWorldEngineWorld(nextSeed, WIDTH, HEIGHT, 10)
+    const { width, height } = worldSize()
+    const next = await fetchWorldEngineWorld(nextSeed, width, height, 10)
     next.landRatio = landRatio
     next.continentMass = continentMass
     clearAutosave()
@@ -1218,7 +1264,7 @@ function bind() {
   renderLayerChips()
 
   const globeCanvas = document.querySelector<HTMLCanvasElement>('#globe')
-  if (globeCanvas) planet = new PlanetView(globeCanvas)
+  if (globeCanvas) planet = new PlanetView(globeCanvas, QUALITY_PRESETS[mapQuality])
   window.addEventListener('resize', () => {
     if (viewMode === 'planet') planet?.layout()
     else applyViewTransform()
@@ -1376,28 +1422,46 @@ function bind() {
     updateInspector()
     scheduleAutosave()
   })
-  document.querySelector('#suggestCities')!.addEventListener('click', () => {
+  document.querySelector('#suggestSettlements')!.addEventListener('click', () => {
     if (!world) return
-    beginStroke('Suggest cities', {
-      title: 'You asked for suggested cities',
-      why: 'The app places cities only on decent land (coast, rivers, gentle slopes) — not on ocean or peaks.',
+    const plan = (document.querySelector<HTMLSelectElement>('#settlementPlan')?.value ?? 'mix') as SettlementPlan
+    beginStroke('Suggest settlements', {
+      title: 'You asked for suggested settlements',
+      why: 'The app picks towns by role — capitals on good land, farms on plains, ports on coasts, mines in highlands, and so on.',
     })
     strokeActive = false
-    const added = suggestCities(world, 5)
+    const added = suggestSettlements(world, plan, 5)
     world.cities.push(...added)
     updateCities()
     updateHistoryButtons()
     renderer.invalidate()
     scheduleAutosave()
+    const roles = added.map((c) => formatSettlementRole(resolveCityRole(c, world!))).join(', ')
     announceChange(
-      added.length ? `You added ${added.length} suggested ${added.length === 1 ? 'city' : 'cities'}` : 'No cities were added',
       added.length
-        ? 'They sit on high-suitability cells. Heights, rivers, and climate did not change — only dots on the map.'
-        : 'No strong sites right now. Heights did not change.',
+        ? `You added ${added.length} settlement${added.length === 1 ? '' : 's'}`
+        : 'No settlements were added',
       added.length
-        ? 'Open the Settle look (green = good). Click a name in the city list to zoom.'
-        : 'Switch to Settle look, raise gentler coasts, then try again.',
+        ? `${roles}. Heights, rivers, and climate did not change — only the city list.`
+        : 'No strong sites for that role right now. Heights did not change.',
+      added.length
+        ? 'Open the city list to see what each town does. Click a name to focus it on the map.'
+        : 'Try another role, or switch to Settle look and improve the land first.',
     )
+  })
+  document.querySelector<HTMLSelectElement>('#mapQuality')?.addEventListener('change', (e) => {
+    const next = (e.target as HTMLSelectElement).value as MapQuality
+    if (!(next in QUALITY_PRESETS)) return
+    mapQuality = next
+    saveMapQuality(mapQuality)
+    planet?.setQuality(QUALITY_PRESETS[mapQuality])
+    renderer.invalidate()
+    showCoach({
+      title: `Quality: ${QUALITY_PRESETS[mapQuality].label}`,
+      tip: `${QUALITY_PRESETS[mapQuality].width}×${QUALITY_PRESETS[mapQuality].height} grid · sharper 3D globe textures.`,
+      next: 'Hit New world to generate at this size. Saves you load keep their original dimensions.',
+      tone: 'tip',
+    })
   })
   document.querySelector('#clearCities')!.addEventListener('click', () => {
     if (!world?.cities.length) return
@@ -1845,18 +1909,19 @@ function tryPlaceCity(x: number, y: number) {
     return
   }
   const result = evaluateSuitability(world, x, y)
+  const role = inferSettlementRole(world, x, y)
   beginStroke('Found city', {
     title: `You founded a city`,
     why: 'A settlement marker was placed. Heights, rivers, and climate did not change — only the city list.',
   })
   strokeActive = false
   const name = nextCityName(world)
-  world.cities.push({ x, y, name, score: result.score })
+  world.cities.push({ x, y, name, score: result.score, role })
   announceChange(
     `You founded ${name}`,
     result.tier === 'favorable'
-      ? `Favorable site (${(result.score * 100) | 0}%). Land and weather are unchanged.`
-      : `Hard site (${(result.score * 100) | 0}%) — harsh but plausible. Land and weather are unchanged.`,
+      ? `${formatSettlementRole(role)} · ${describeSettlementRole(role)} · favorable site (${(result.score * 100) | 0}%).`
+      : `${formatSettlementRole(role)} · ${describeSettlementRole(role)} · hard site (${(result.score * 100) | 0}%).`,
     result.tier === 'favorable'
       ? 'Rename it in the city list. Found more on green Settle-look land.'
       : 'Rename it in the city list. Amber Settle cells are tough but valid towns.',
@@ -1879,10 +1944,7 @@ function startLoop() {
 
 /** Fewer pixels on huge grids so the canvas stays snappy. */
 function rasterScale(w: World): number {
-  const cells = w.width * w.height
-  if (cells > 160_000) return 2
-  if (cells > 80_000) return 3
-  return 4
+  return atlasRasterScale(w.width * w.height, mapQuality)
 }
 
 /** Draw the current world onto the canvas. Called every animation frame while dirty. */
@@ -1896,6 +1958,7 @@ function paint() {
       src,
       globeLook,
       `${src.seed}|${src.width}x${src.height}|${src.elev[0]}|${src.elev[(src.elev.length / 2) | 0]}|${src.seaLevel}|${src.biome[(src.biome.length / 2) | 0]}|${src.cities.length}|${climatePhase}|${Math.round(timelineAge)}`,
+      QUALITY_PRESETS[mapQuality],
     )
     planet.render()
     return
@@ -2006,17 +2069,21 @@ function updateCities() {
   const el = document.querySelector('#cities')
   if (!el) return
   if (!world?.cities.length) {
-    el.innerHTML = `<li class="empty-city">None yet — try <em>Suggest cities</em> or the Found tool</li>`
+    el.innerHTML = `<li class="empty-city">None yet — try <em>Suggest settlements</em> or the Found tool</li>`
     return
   }
   el.innerHTML = world.cities
-    .map(
-      (c, i) =>
-        `<li class="city-row">
-          <input type="text" class="city-name" data-city="${i}" value="${escapeAttr(c.name)}" maxlength="40" spellcheck="false" aria-label="Rename ${escapeAttr(c.name)}" />
+    .map((c, i) => {
+      const role = resolveCityRole(c, world!)
+      return `<li class="city-row">
+          <div class="city-main">
+            <input type="text" class="city-name" data-city="${i}" value="${escapeAttr(c.name)}" maxlength="40" spellcheck="false" aria-label="Rename ${escapeAttr(c.name)}" />
+            <span class="city-role" title="${escapeAttr(describeSettlementRole(role))}">${escapeAttr(formatSettlementRole(role))}</span>
+            <small class="city-blurb">${escapeAttr(describeSettlementRole(role))}</small>
+          </div>
           <button type="button" class="city-score" data-focus-city="${i}" title="Show on map">${(c.score * 100) | 0}%</button>
-        </li>`,
-    )
+        </li>`
+    })
     .join('')
 
   el.querySelectorAll<HTMLInputElement>('.city-name').forEach((input) => {

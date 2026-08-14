@@ -1,0 +1,40 @@
+import { describe, expect, it } from 'vitest'
+import { generateWorld } from '../../src/world/generate'
+import {
+  inferSettlementRole,
+  scoreSettlementRole,
+  suggestSettlementMix,
+  suggestSettlementsForRole,
+} from '../../src/world/settlements'
+
+describe('settlement roles', () => {
+  it('assigns roles from geography on a generated world', () => {
+    const world = generateWorld(96, 48, 42, 0.4, 'continents')
+    const mix = suggestSettlementMix(world)
+    expect(mix.length).toBeGreaterThan(0)
+    const roles = new Set(mix.map((c) => c.role))
+    expect(roles.has('seat_of_power') || mix.some((c) => c.role === 'seat_of_power')).toBe(true)
+    for (const city of mix) {
+      expect(city.role).toBeTruthy()
+      expect(city.score).toBeGreaterThan(0)
+    }
+  })
+
+  it('labels every settlement role for the UI', () => {
+    const world = generateWorld(48, 24, 7, 0.4, 'continents')
+    for (const role of ['seat_of_power', 'farmland', 'fishing', 'mining', 'hunting', 'trade', 'pastoral'] as const) {
+      const s = scoreSettlementRole(world, 20, 12, role)
+      expect(s).toBeGreaterThanOrEqual(0)
+      expect(s).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('can suggest a specific role', () => {
+    const world = generateWorld(96, 48, 99, 0.4, 'continents')
+    const farms = suggestSettlementsForRole(world, 'farmland', 2)
+    expect(farms.length).toBeGreaterThan(0)
+    expect(farms.every((c) => c.role === 'farmland')).toBe(true)
+    const role = inferSettlementRole(world, farms[0].x, farms[0].y)
+    expect(['farmland', 'pastoral', 'trade']).toContain(role)
+  })
+})

@@ -181,7 +181,7 @@ export function describeWorldNow(world: World): string[] {
     `Plants (Biome look): about ${forest}% forest/rain/taiga and ${dry}% grass/savanna/desert, plus ice and mountains.`,
     s.cities
       ? `${s.cities} ${s.cities === 1 ? 'city' : 'cities'} on the map.`
-      : `No cities yet — Found city on green or amber Settle land, or Suggest cities.`,
+      : `No cities yet — Found city or Suggest settlements from the left panel.`,
   ]
 }
 

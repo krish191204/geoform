@@ -1,10 +1,17 @@
 /**
  * 3D globe view. Same World arrays, wrapped onto a sphere with Three.js.
- * Color and bump textures are baked from draw.ts. Spin with the mouse.
- * This is a skin on the same numbers — it does not generate a second planet.
+ * Color, normal, bump, and displacement textures are baked from draw.ts.
  */
 import * as THREE from 'three'
-import { bakeBumpImageData, bakeWorldImageData, type MapLook } from './draw'
+import {
+  bakeBumpImageData,
+  bakeDisplacementImageData,
+  bakeNormalImageData,
+  bakeWorldImageData,
+  type MapLook,
+} from './draw'
+import type { QualityPreset } from '../world/quality'
+import { QUALITY_PRESETS } from '../world/quality'
 import type { World } from '../world/types'
 
 function imageDataToTexture(image: ImageData): THREE.CanvasTexture {
@@ -30,6 +37,9 @@ export class PlanetView {
   private sun: THREE.DirectionalLight
   private colorTex: THREE.CanvasTexture | null = null
   private bumpTex: THREE.CanvasTexture | null = null
+  private normalTex: THREE.CanvasTexture | null = null
+  private dispTex: THREE.CanvasTexture | null = null
+  private qualityKey = ''
   private yaw = 0.85
   private pitch = 0.22
   private distance = 3.15
@@ -38,7 +48,7 @@ export class PlanetView {
   private lastY = 0
   private cacheKey = ''
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, preset = QUALITY_PRESETS.standard) {
     this.canvas = canvas
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -51,9 +61,8 @@ export class PlanetView {
     this.scene = new THREE.Scene()
     this.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 40)
 
-    const geo = new THREE.SphereGeometry(1, 96, 64)
     this.globe = new THREE.Mesh(
-      geo,
+      this.makeGlobeGeometry(preset),
       new THREE.MeshStandardMaterial({
         color: 0xffffff,
         roughness: 0.72,
@@ -82,8 +91,22 @@ export class PlanetView {
     const stars = this.makeStars()
     this.scene.add(stars)
 
+    this.qualityKey = preset.id
     this.layout()
     this.applyCamera()
+  }
+
+  private makeGlobeGeometry(preset: QualityPreset): THREE.SphereGeometry {
+    return new THREE.SphereGeometry(1, preset.globeWidthSegments, preset.globeHeightSegments)
+  }
+
+  setQuality(preset: QualityPreset): void {
+    if (preset.id === this.qualityKey) return
+    this.qualityKey = preset.id
+    this.cacheKey = ''
+    const oldGeo = this.globe.geometry
+    this.globe.geometry = this.makeGlobeGeometry(preset)
+    oldGeo.dispose()
   }
 
   private makeStars(): THREE.Points {
@@ -119,19 +142,29 @@ export class PlanetView {
     this.cacheKey = `stale:${look}`
   }
 
-  sync(world: World, look: MapLook, dirtyKey: string): void {
-    const key = `${dirtyKey}|${look}|${world.width}x${world.height}`
+  sync(world: World, look: MapLook, dirtyKey: string, preset = QUALITY_PRESETS.standard): void {
+    this.setQuality(preset)
+    const bake = preset.globeBake
+    const key = `${dirtyKey}|${look}|${world.width}x${world.height}|${preset.id}|${bake}`
     if (key === this.cacheKey && this.colorTex) return
     this.cacheKey = key
     this.colorTex?.dispose()
     this.bumpTex?.dispose()
-    this.colorTex = imageDataToTexture(bakeWorldImageData(world, look, 2))
-    this.bumpTex = imageDataToTexture(bakeBumpImageData(world, 2))
+    this.normalTex?.dispose()
+    this.dispTex?.dispose()
+    this.colorTex = imageDataToTexture(bakeWorldImageData(world, look, bake))
+    this.bumpTex = imageDataToTexture(bakeBumpImageData(world, bake))
+    this.normalTex = imageDataToTexture(bakeNormalImageData(world, bake))
+    this.dispTex = imageDataToTexture(bakeDisplacementImageData(world, bake))
     const night = look === 'night'
     const mat = this.globe.material as THREE.MeshStandardMaterial
     mat.map = this.colorTex
     mat.bumpMap = this.bumpTex
-    mat.bumpScale = night ? 0.02 : 0.045
+    mat.bumpScale = night ? 0.025 : 0.05
+    mat.normalMap = this.normalTex
+    mat.normalScale = new THREE.Vector2(1.15, 1.15)
+    mat.displacementMap = this.dispTex
+    mat.displacementScale = night ? preset.displacementScale * 0.5 : preset.displacementScale
     mat.emissive = new THREE.Color(night ? 0x22180c : 0x000000)
     mat.emissiveMap = night ? this.colorTex : null
     mat.emissiveIntensity = night ? 0.85 : 0
@@ -212,6 +245,8 @@ export class PlanetView {
   dispose(): void {
     this.colorTex?.dispose()
     this.bumpTex?.dispose()
+    this.normalTex?.dispose()
+    this.dispTex?.dispose()
     this.renderer.dispose()
   }
 }

@@ -326,6 +326,65 @@ export function bakeBumpImageData(world: World, scale = 2): ImageData {
   return image
 }
 
+/** RGB normal map from elevation slope — sharper mountains on the 3D globe. */
+export function bakeNormalImageData(world: World, scale = 2): ImageData {
+  const { width: w, height: h, elev, seaLevel } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+
+  const sample = (x: number, y: number) => {
+    const cx = Math.max(0, Math.min(w - 1, x))
+    const cy = Math.max(0, Math.min(h - 1, y))
+    return elev[cy * w + cx]
+  }
+
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const e = elev[y * w + x]
+      const dx = (sample(x + 1, y) - sample(x - 1, y)) * 2.4
+      const dy = (sample(x, y + 1) - sample(x, y - 1)) * 2.4
+      const dz = e < seaLevel ? 0.35 : 0.85 + Math.max(0, e - seaLevel) * 0.5
+      const len = Math.hypot(dx, dy, dz) || 1
+      const o = (py * cw + px) * 4
+      data[o] = Math.round((-dx / len) * 0.5 * 255 + 128)
+      data[o + 1] = Math.round((dy / len) * 0.5 * 255 + 128)
+      data[o + 2] = Math.round((dz / len) * 0.5 * 255 + 128)
+      data[o + 3] = 255
+    }
+  }
+  return image
+}
+
+/** Displacement height for globe mesh (land rises, ocean sinks slightly). */
+export function bakeDisplacementImageData(world: World, scale = 2): ImageData {
+  const { width: w, height: h, elev, seaLevel } = world
+  const cw = Math.max(1, w * scale)
+  const ch = Math.max(1, h * scale)
+  const image = new ImageData(cw, ch)
+  const data = image.data
+  for (let py = 0; py < ch; py++) {
+    const y = Math.min(h - 1, (py / scale) | 0)
+    for (let px = 0; px < cw; px++) {
+      const x = Math.min(w - 1, (px / scale) | 0)
+      const e = elev[y * w + x]
+      const v =
+        e < seaLevel
+          ? Math.round(40 + (e / Math.max(seaLevel, 1e-6)) * 30)
+          : Math.round(110 + ((e - seaLevel) / Math.max(1e-6, 1 - seaLevel)) * 145)
+      const o = (py * cw + px) * 4
+      data[o] = v
+      data[o + 1] = v
+      data[o + 2] = v
+      data[o + 3] = 255
+    }
+  }
+  return image
+}
+
 export interface DrawOptions {
   layer: Layer
   showRivers: boolean

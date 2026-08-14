@@ -13,9 +13,8 @@
  * reshape continents on every dab — that would eat your rectangle while
  * you are still drawing it. Refresh geography does that later.
  */
-import { evaluateSuitability } from './climate'
-import { nextCityName } from './generate'
 import { fbm } from './noise'
+import { suggestSettlementMix } from './settlements'
 import type { City, World } from './types'
 
 const idx = (w: number, x: number, y: number) => y * w + x
@@ -229,65 +228,9 @@ export function brushSeaLevel(
   }
 }
 
-/** Drop cities on viable cells — mix favorable defaults with harsh-but-plausible sites. */
-export function suggestCities(world: World, count: number): City[] {
-  const { width: w, height: h } = world
-  const favorable: { x: number; y: number; score: number }[] = []
-  const marginal: { x: number; y: number; score: number }[] = []
-  for (let y = 2; y < h - 2; y += 2) {
-    for (let x = 2; x < w - 2; x += 2) {
-      const r = evaluateSuitability(world, x, y)
-      if (r.tier === 'blocked') continue
-      const cell = { x, y, score: r.score }
-      if (r.tier === 'favorable') favorable.push(cell)
-      else marginal.push(cell)
-    }
-  }
-  favorable.sort((a, b) => b.score - a.score)
-  marginal.sort((a, b) => b.score - a.score)
-
-  const favorTarget = Math.max(1, Math.ceil(count * 0.55))
-  const pools: { x: number; y: number; score: number }[][] = [
-    favorable,
-    marginal,
-  ]
-  const targets = [favorTarget, count - favorTarget]
-  const placed: City[] = []
-  const scratch = { cities: [...world.cities] as City[] }
-
-  for (let p = 0; p < pools.length && placed.length < count; p++) {
-    let added = 0
-    for (const c of pools[p]) {
-      if (placed.length >= count || added >= targets[p]) break
-      if (scratch.cities.some((e) => Math.hypot(e.x - c.x, e.y - c.y) < 8)) continue
-      const city: City = {
-        x: c.x,
-        y: c.y,
-        name: nextCityName(scratch as World),
-        score: c.score,
-      }
-      placed.push(city)
-      scratch.cities.push(city)
-      added++
-    }
-  }
-
-  // Fill any remaining slots from whichever pool still has room.
-  const rest = [...favorable, ...marginal].sort((a, b) => b.score - a.score)
-  for (const c of rest) {
-    if (placed.length >= count) break
-    if (placed.some((e) => Math.hypot(e.x - c.x, e.y - c.y) < 8)) continue
-    if (scratch.cities.some((e) => Math.hypot(e.x - c.x, e.y - c.y) < 8)) continue
-    const city: City = {
-      x: c.x,
-      y: c.y,
-      name: nextCityName(scratch as World),
-      score: c.score,
-    }
-    placed.push(city)
-    scratch.cities.push(city)
-  }
-  return placed
+/** @deprecated Use suggestSettlementMix from settlements.ts */
+export function suggestCities(world: World, _count: number): City[] {
+  return suggestSettlementMix(world)
 }
 
 /** Delete the city closest to (x, y) if it is within maxDist cells. */
