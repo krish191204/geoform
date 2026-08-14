@@ -1,3 +1,13 @@
+/**
+ * A checklist of "this cannot happen on a planet."
+ *
+ * The editor no longer nags with this. It silently repairs instead
+ * (see geography.ts). Critique still uses these flags to grade a map
+ * you *wanted* to leave broken.
+ *
+ * Speckle = tiny island. Rectangle = land fills its bounding box like a stamp.
+ * Dead climate = temp/rain still zero because weather never ran.
+ */
 import { landBboxFill, landmassStats, type ContinentMass } from './mass'
 import type { World } from './types'
 
@@ -10,6 +20,7 @@ export interface GeoFlag {
   detail: string
 }
 
+/** Average land temperature in a band of rows. Used to catch "poles hotter than equator." */
 function meanLandTemp(world: World, y0: number, y1: number): number | null {
   const { width: w, elev, seaLevel, temp } = world
   let s = 0
@@ -25,6 +36,7 @@ function meanLandTemp(world: World, y0: number, y1: number): number | null {
   return n ? s / n : null
 }
 
+/** Count fat river cells that have no downhill neighbor (water climbing a hill). */
 function riversClimb(world: World): { count: number; x: number; y: number } {
   const { width: w, height: h, elev, seaLevel, flux } = world
   let maxFlux = 0

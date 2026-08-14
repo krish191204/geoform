@@ -1,3 +1,8 @@
+/**
+ * Top bar shared by every page: Map editor, Labs, Critique, Roadmap.
+ * navHtml('editor') highlights the current page. Keep links in sync if you
+ * add a page.
+ */
 import './nav.css'
 
 export type AppPage = 'editor' | 'labs' | 'critique' | 'roadmap'

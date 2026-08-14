@@ -1,3 +1,11 @@
+/**
+ * Critique page (`/critique.html`). Drop a Geoform JSON (or a picture) and
+ * get a grade. Gallery includes healthy worlds and deliberately broken ones.
+ *
+ * Repair like the editor runs harmonizeWorld. Leave it broken if you want
+ * to see why the score is bad. deserializeWorld(..., { repair: false })
+ * is how we load a broken save without silently fixing it.
+ */
 import './style.css'
 import { navHtml } from '../chrome/nav'
 import {

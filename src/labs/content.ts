@@ -1,3 +1,7 @@
+/**
+ * Copy for each lab: title, the physics in one breath, what you should notice.
+ * Keep this in sync with the demos in elevation.ts, rivers.ts, etc.
+ */
 export type LabId = 'elevation' | 'rivers' | 'rain' | 'tectonics' | 'settle' | 'continents'
 
 export interface LabMeta {

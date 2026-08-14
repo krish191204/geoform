@@ -1,3 +1,20 @@
+/**
+ * Quiet repair pipeline — the function that makes the planet "possible".
+ *
+ * Call harmonizeWorld after generate, load, add-continent, or Refresh.
+ * Do NOT call the heavy sculpt on every paint dab or the brush fights you.
+ *
+ * Order (why it matters):
+ *  1. If land/water mix is insane, move the water line.
+ *  2. Reshape masses (drown speckles or keep islands).
+ *  3. Chew ruler-straight coasts so a painted rectangle stops looking like a stamp.
+ *  4. Optional mountain-building at plate edges (only when sculpt: true).
+ *  5. Cut river outlets so water reaches the sea.
+ *  6. Move cities off the ocean.
+ *  7. Rebuild climate / rivers / biomes from the new heights.
+ *
+ * The UI does not pop errors. It just fixes the map.
+ */
 import { ensureDrainage, recomputeDerived } from './climate'
 import { chewStraightCoasts, meanderCoasts } from './coasts'
 import { applyLandRatio, landFraction, MAX_LAND_RATIO, MIN_LAND_RATIO } from './land'
@@ -5,8 +22,10 @@ import { clampContinentMass, cohereLand, drownOffshoreSpeckle, fitCoastalLandRat
 import { createRng, fbm } from './noise'
 import type { World } from './types'
 
+/** Cell (x, y) → flat array index. Memorize this; every file uses it. */
 const idx = (w: number, x: number, y: number) => y * w + x
 
+/** Make sure each plate has a slide direction. Old worlds may be missing this. */
 export function ensurePlateMotion(world: World): void {
   const n = Math.max(1, world.plateCount)
   if (world.plateVx.length === n && world.plateVy.length === n) return
@@ -30,7 +49,11 @@ export function ensurePlateMotion(world: World): void {
   world.plateVy = vy
 }
 
-/** Raise ranges and drop rifts from current plate contacts and continent shape. */
+/**
+ * Raise mountains and drop rifts where plates currently touch.
+ * "Orogeny" = mountain-building. We only run this on New world / Refresh,
+ * not on every paint dab — otherwise every brush stroke grows a Himalaya.
+ */
 export function sculptOrogeny(world: World): void {
   ensurePlateMotion(world)
   const { width: w, height: h, elev, plateId, seaLevel, plateVx, plateVy, seed } = world
@@ -57,6 +80,7 @@ export function sculptOrogeny(world: World): void {
         const len = Math.hypot(dx, dy) || 1
         const relx = plateVx[p] - plateVx[q]
         const rely = plateVy[p] - plateVy[q]
+        // approach > 0 means plates are crashing into each other.
         const approach = -(relx * dx + rely * dy) / len
         const n = fbm(x / 10, y / 10, seed + 4, 3)
         if (approach > 0.02 && land && nLand) {
@@ -85,6 +109,7 @@ export function sculptOrogeny(world: World): void {
   }
 }
 
+/** Old saves might lack climate arrays. Allocate them to the current grid size. */
 function ensureArrays(world: World): void {
   const n = world.width * world.height
   if (world.temp.length === n && world.biome.length === n && world.flux.length === n) return
@@ -95,6 +120,10 @@ function ensureArrays(world: World): void {
   world.suitability = new Float32Array(n)
 }
 
+/**
+ * Cities cannot float. If a city sits on ocean (or off the map), scoot it
+ * to the nearest land cell. If there is no land, delete it.
+ */
 function relocateOceanCities(world: World): void {
   const { width: w, height: h, elev, seaLevel } = world
   for (const c of world.cities) {
@@ -172,6 +201,7 @@ export function harmonizeWorld(world: World, opts?: { sculpt?: boolean }): void 
   recomputeDerived(world)
 }
 
+/** Same as harmonizeWorld. The button is labeled Refresh geography. */
 export function refreshGeography(world: World, opts?: { sculpt?: boolean }): void {
   harmonizeWorld(world, opts)
 }

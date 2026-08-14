@@ -1,3 +1,7 @@
+/**
+ * What a critique report looks like: a score, a list of issues, optional pins
+ * on the preview. source tells you if we graded JSON or a picture.
+ */
 export type Severity = 'critical' | 'major' | 'minor' | 'note'
 
 export type IssueKind =

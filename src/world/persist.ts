@@ -1,3 +1,15 @@
+/**
+ * Save / load. The planet lives in RAM; this file turns it into JSON and back.
+ *
+ * serializeWorld   → a plain object you can JSON.stringify
+ * deserializeWorld → arrays again. By default it *repairs* geography on load
+ *                    (harmonizeWorld). Critique passes { repair: false } so it
+ *                    can grade a broken save as broken.
+ * autosaveWorld    → localStorage in THIS browser only. Another machine will
+ *                    not see it. Use Save (download) to carry a file around.
+ *
+ * TypedArrays cannot go in JSON, so we convert them to number[].
+ */
 import type { World } from './types'
 import { refreshGeography } from './geography'
 import { landFraction } from './land'
@@ -5,6 +17,7 @@ import { clampContinentMass, DEFAULT_CONTINENT_MASS } from './mass'
 
 const STORAGE_KEY = 'geoform.autosave.v1'
 
+/** JSON on disk / in localStorage. TypedArrays become number[] because JSON cannot hold Float32Array. */
 export interface SavedWorld {
   version: 1
   savedAt: string
@@ -33,6 +46,7 @@ export interface SavedWorld {
   plateVy?: number[]
 }
 
+/** Snapshot a World as JSON-friendly arrays. This is the Save file. */
 export function serializeWorld(world: World): SavedWorld {
   return {
     version: 1,
@@ -63,6 +77,10 @@ export function serializeWorld(world: World): SavedWorld {
   }
 }
 
+/**
+ * Turn a save file back into a World.
+ * repair defaults to true (editor / autosave). Critique sets repair: false.
+ */
 export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }): World {
   if (data.version !== 1) throw new Error(`Unsupported save version: ${data.version}`)
   const n = data.width * data.height
@@ -100,6 +118,7 @@ export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }):
   return world
 }
 
+/** Remember the map in this browser. Lost if you clear site data. */
 export function autosaveWorld(world: World): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeWorld(world)))
@@ -108,6 +127,7 @@ export function autosaveWorld(world: World): void {
   }
 }
 
+/** Restore the last autosave from this browser, or null if there isn't one. */
 export function loadAutosave(): World | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -127,6 +147,7 @@ export function hasAutosave(): boolean {
   return localStorage.getItem(STORAGE_KEY) !== null
 }
 
+/** Trigger a browser download of geoform-seed-….json */
 export function downloadWorld(world: World, filename?: string): void {
   const blob = new Blob([JSON.stringify(serializeWorld(world), null, 2)], {
     type: 'application/json',
@@ -139,6 +160,7 @@ export function downloadWorld(world: World, filename?: string): void {
   URL.revokeObjectURL(url)
 }
 
+/** Read a JSON file the user dropped or picked. Repairs unless you say not to. */
 export async function readWorldFile(file: File): Promise<World> {
   const text = await file.text()
   return deserializeWorld(JSON.parse(text) as SavedWorld)

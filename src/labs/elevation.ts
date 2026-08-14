@@ -1,3 +1,8 @@
+/**
+ * Lab 01 — raise a mountain, watch the summit freeze.
+ * Lapse rate: air cools about 6.5 °C per km of height. Same latitude,
+ * different world once you have a peak.
+ */
 import { approach, ambientPhase, EASE, prefersReducedMotion } from './motion'
 import { clamp, drawAtmosphere, lerp, resizeCanvas, softNoise, type StopFn } from './shared'
 

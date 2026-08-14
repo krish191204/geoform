@@ -1,3 +1,8 @@
+/**
+ * Lab 02 — rivers from height. Water is lazy: it always flows downhill.
+ * Thick lines are where many cells dump into one (a confluence), not decoration.
+ * X wraps like the editor so a river can cross the date line.
+ */
 import { approach, ambientPhase, EASE, prefersReducedMotion } from './motion'
 import {
   clamp,

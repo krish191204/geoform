@@ -1,3 +1,7 @@
+/**
+ * Grade a picture of a map (PNG/JPEG), not a Geoform JSON.
+ * We guess height/water from colors. Less accurate than grading a save file.
+ */
 import type { CritiqueResult, MapIssue, Severity } from './types'
 import { sampleBrokenDesertJungle, sampleToCanvas } from './sampleMaps'
 

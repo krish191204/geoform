@@ -233,6 +233,39 @@ button.primary:hover {
   gap: 0.5rem;
 }
 
+.tool-label,
+.style-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.tool-icon,
+.chip-icon {
+  flex: 0 0 auto;
+  display: block;
+  opacity: 0.88;
+}
+
+.tool.active .tool-icon,
+.chip.active .chip-icon,
+.style-chip.active .chip-icon {
+  opacity: 1;
+}
+
+.chip,
+#hudTool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+#hudTool .tool-icon {
+  width: 16px;
+  height: 16px;
+}
+
 .tool kbd {
   font-family: inherit;
   font-size: 0.68rem;
@@ -250,6 +283,59 @@ button.primary:hover {
   font-weight: 400;
   font-size: 0.75rem;
   margin-top: 0.12rem;
+}
+
+.place-banner {
+  display: grid;
+  gap: 0.15rem;
+  margin-bottom: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(28, 34, 28, 0.14);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.place-banner strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.place-banner span {
+  font-weight: 600;
+}
+
+.place-banner small {
+  opacity: 0.8;
+  font-size: 0.78rem;
+}
+
+.place-banner.ok {
+  border-color: rgba(54, 120, 72, 0.35);
+  background: rgba(54, 120, 72, 0.12);
+  color: #1f4a2c;
+}
+
+.place-banner.soft {
+  border-color: rgba(168, 110, 28, 0.4);
+  background: rgba(184, 130, 40, 0.14);
+  color: #5a3a10;
+}
+
+.place-banner.hard {
+  border-color: rgba(160, 48, 40, 0.4);
+  background: rgba(176, 48, 40, 0.12);
+  color: #6a2018;
+}
+
+#map.place-blocked {
+  outline: 2px solid rgba(176, 48, 40, 0.35);
+  outline-offset: -2px;
+}
+
+#map.place-ok {
+  outline: 2px solid rgba(54, 120, 72, 0.28);
+  outline-offset: -2px;
 }
 
 .style-grid {

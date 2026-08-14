@@ -1,3 +1,7 @@
+/**
+ * Lab 03 — rain shadow. Moist air climbs a ridge, dumps rain, then the far
+ * side is dry. This is orography: mountains mint deserts.
+ */
 import { approach, ambientPhase, EASE, prefersReducedMotion } from './motion'
 import { drawAtmosphere, resizeCanvas, type StopFn } from './shared'
 
