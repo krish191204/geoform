@@ -603,7 +603,7 @@ export class MapRenderer {
 
   /** Patch only the brush footprint — avoids a full atlas rebuild on every dab. */
   patchRegion(world: World, opts: DrawOptions, cx: number, cy: number, brushR: number) {
-    const scale = opts.scale ?? this.scale
+    const scale = Math.max(1, Math.round(opts.scale ?? this.scale))
     this.scale = scale
     const { width: w, height: h } = world
     const cw = w * scale
@@ -736,7 +736,7 @@ export class MapRenderer {
   }
 
   private rebuildBase(world: World, opts: DrawOptions, time: number) {
-    const scale = opts.scale ?? this.scale
+    const scale = Math.max(1, Math.round(opts.scale ?? this.scale))
     this.scale = scale
     const { width: w, height: h } = world
     const cw = w * scale
@@ -745,44 +745,28 @@ export class MapRenderer {
     const image = new ImageData(cw, ch)
     const data = image.data
 
-    for (let py = 0; py < ch; py++) {
-      const yf = py / scale
-      const y0 = Math.min(h - 1, yf | 0)
-      const y1 = Math.min(h - 1, y0 + 1)
-      const fy = yf - y0
-      for (let px = 0; px < cw; px++) {
-        const xf = px / scale
-        const x0 = Math.min(w - 1, xf | 0)
-        const x1 = Math.min(w - 1, x0 + 1)
-        const fx = xf - x0
-
-        const c00 = cellColor(world, opts.layer, x0, y0, riverAmt, time)
-        const c10 = cellColor(world, opts.layer, x1, y0, riverAmt, time)
-        const c01 = cellColor(world, opts.layer, x0, y1, riverAmt, time)
-        const c11 = cellColor(world, opts.layer, x1, y1, riverAmt, time)
-        const top = mix(c00, c10, fx)
-        const bot = mix(c01, c11, fx)
-        const [r, g, b] = mix(top, bot, fy)
-
-        const o = (py * cw + px) * 4
-        data[o] = r
-        data[o + 1] = g
-        data[o + 2] = b
-        data[o + 3] = 255
-      }
-    }
-
-    // Soft vignette baked lightly into edges
-    for (let py = 0; py < ch; py++) {
-      for (let px = 0; px < cw; px++) {
-        const nx = (px / cw) * 2 - 1
-        const ny = (py / ch) * 2 - 1
+    for (let y = 0; y < h; y++) {
+      const ny = ((y + 0.5) / h) * 2 - 1
+      for (let x = 0; x < w; x++) {
+        const [r, g, b] = cellColor(world, opts.layer, x, y, riverAmt, time)
+        const nx = ((x + 0.5) / w) * 2 - 1
         const v = Math.min(1, Math.sqrt(nx * nx * 0.7 + ny * ny * 0.95))
         const dark = 1 - v * v * 0.18
-        const o = (py * cw + px) * 4
-        data[o] = clamp(data[o] * dark)
-        data[o + 1] = clamp(data[o + 1] * dark)
-        data[o + 2] = clamp(data[o + 2] * dark)
+        const rr = clamp(r * dark)
+        const gg = clamp(g * dark)
+        const bb = clamp(b * dark)
+        const x0 = x * scale
+        const y0 = y * scale
+        for (let sy = 0; sy < scale; sy++) {
+          let o = ((y0 + sy) * cw + x0) * 4
+          for (let sx = 0; sx < scale; sx++) {
+            data[o] = rr
+            data[o + 1] = gg
+            data[o + 2] = bb
+            data[o + 3] = 255
+            o += 4
+          }
+        }
       }
     }
 
@@ -791,7 +775,7 @@ export class MapRenderer {
 
   draw(ctx: CanvasRenderingContext2D, world: World, opts: DrawOptions) {
     const time = opts.time ?? performance.now() / 1000
-    const scale = opts.scale ?? this.scale
+    const scale = Math.max(1, Math.round(opts.scale ?? this.scale))
     const cw = world.width * scale
     const ch = world.height * scale
     if (ctx.canvas.width !== cw || ctx.canvas.height !== ch) {
@@ -827,6 +811,7 @@ export class MapRenderer {
     if (
       !opts.painting &&
       !reduceMotion &&
+      cw * ch <= 400_000 &&
       (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation')
     ) {
       this.shimmerFrame++

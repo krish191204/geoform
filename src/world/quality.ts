@@ -119,11 +119,12 @@ export function atlasRasterScaleForZoom(
   preview = false,
 ): number {
   const cells = worldWidth * worldHeight
-  const base = atlasRasterScale(cells, quality) * displayPixelRatio()
+  const prod = typeof import.meta !== 'undefined' && import.meta.env?.PROD
+  const dpr = prod ? 1 : displayPixelRatio()
+  const base = atlasRasterScale(cells, quality) * dpr
   const desired = base * Math.max(1, viewZoom)
-  const maxPixels =
-    typeof import.meta !== 'undefined' && import.meta.env?.PROD ? 6_000_000 : 10_000_000
-  const maxScale = Math.sqrt(maxPixels / Math.max(1, cells))
+  const maxPixels = prod ? 1_500_000 : 8_000_000
+  const maxScale = Math.max(2, Math.floor(Math.sqrt(maxPixels / Math.max(1, cells))))
   let scale = Math.max(2, Math.min(maxScale, Math.round(desired)))
   if (preview) scale = Math.min(scale, 3)
   return scale

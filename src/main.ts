@@ -225,7 +225,7 @@ function layoutPlanetIfNeeded() {
 }
 
 function wantsContinuousAnimation(): boolean {
-  if (!world || painting) return false
+  if (!world || painting || mapPaintPending) return false
   if (
     typeof window !== 'undefined' &&
     (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)

@@ -25,6 +25,8 @@ describe('map quality presets', () => {
     const h = 256
     const at100 = atlasRasterScaleForZoom(w, h, 'standard', 1)
     const at320 = atlasRasterScaleForZoom(w, h, 'standard', 3.2)
+    expect(Number.isInteger(at100)).toBe(true)
+    expect(Number.isInteger(at320)).toBe(true)
     expect(at320).toBeGreaterThan(at100)
   })
 
