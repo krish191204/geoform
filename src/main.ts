@@ -184,7 +184,7 @@ let pendingNewWorld: (() => void) | null = null
 let timelineAge = 0
 let timelineView: World | null = null
 let timelineTimer: number | null = null
-let showTradeRoutes = true
+let showTradeRoutes = false
 let settlementCoveragePct = 35
 const history = new EditHistory()
 const renderer = new MapRenderer()

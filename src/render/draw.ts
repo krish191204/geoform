@@ -510,7 +510,23 @@ function drawSeaHazards(
   }
 
   ctx.save()
-  ctx.putImageData(image, 0, 0)
+  // putImageData replaces pixels (punches holes in land). drawImage alpha-blends.
+  const layer =
+    typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(cw, ch)
+      : (() => {
+          const c = document.createElement('canvas')
+          c.width = cw
+          c.height = ch
+          return c
+        })()
+  const layerCtx = layer.getContext('2d')
+  if (!layerCtx) {
+    ctx.restore()
+    return
+  }
+  layerCtx.putImageData(image, 0, 0)
+  ctx.drawImage(layer as CanvasImageSource, 0, 0)
   ctx.restore()
 }
 
