@@ -4,10 +4,11 @@
  * Height is the cause. These arrays are the effects — except ensureDrainage,
  * which nicks height so closed bowls can reach the sea (rivers need an outlet).
  *
- * Temperature: hot at the equator, cold at the poles, colder up mountains.
- * Rain: west → east wind along each row, wrapping the cylinder so the date
- *   line is not a moisture wall. Ocean loads the air; slopes dump rain
- *   (orography); the far side is a rain shadow.
+ * Temperature: hot at the equator, cold at the poles, milder near coasts,
+ *   cooler up mountains (gentle lapse — not Himalaya-everywhere).
+ * Rain: crude atmospheric cells — tropical easterlies, mid-latitude westerlies,
+ *   polar easterlies — wrap the cylinder so the date line is not a moisture wall.
+ *   Ocean loads the air; windward slopes dump rain; lee sides stay drier.
  * Rivers: every land cell pours into its lowest neighbor (D8). X wraps.
  * Drainage: carve a downhill path toward the sea before we accumulate flux.
  *
@@ -32,12 +33,14 @@ const wrapX = (x: number, w: number) => ((x % w) + w) % w
 export function classifyBiome(elev: number, sea: number, temp: number, moist: number): Biome {
   if (elev < sea) return elev > sea - 0.03 ? 'coast' : 'ocean'
   if (elev > 0.78) return 'alpine'
-  if (temp < 0.18) return moist > 0.35 ? 'tundra' : 'ice'
-  if (temp < 0.35) return moist > 0.4 ? 'taiga' : 'tundra'
-  if (moist < 0.22) return 'desert'
-  if (moist < 0.38) return temp > 0.55 ? 'savanna' : 'grassland'
-  if (moist > 0.72 && temp > 0.55) return 'rainforest'
-  if (moist > 0.5) return 'forest'
+  // Ice/tundra only for truly cold land — leave mid-latitudes for living biomes.
+  if (temp < 0.12) return moist > 0.28 ? 'tundra' : 'ice'
+  if (temp < 0.28) return moist > 0.32 ? 'taiga' : 'tundra'
+  // True desert needs very dry air; mild aridity becomes grassland/savanna.
+  if (moist < 0.14) return 'desert'
+  if (moist < 0.3) return temp > 0.55 ? 'savanna' : 'grassland'
+  if (moist > 0.68 && temp > 0.52) return 'rainforest'
+  if (moist > 0.45) return 'forest'
   return 'grassland'
 }
 
@@ -50,65 +53,129 @@ function climateLat(world: World, y: number): number {
   return Math.max(0, Math.min(1, (y + world.originY) / span))
 }
 
+/** Coastal influence 0..1 — oceans keep land milder and a bit wetter. */
+function maritimeFactor(world: World, x: number, y: number): number {
+  const { width: w, height: h, elev, seaLevel } = world
+  let best = 0
+  for (let r = 1; r <= 4; r++) {
+    const weight = 1 / r
+    for (const [dx, dy] of [
+      [r, 0],
+      [-r, 0],
+      [0, r],
+      [0, -r],
+      [r, r],
+      [r, -r],
+      [-r, r],
+      [-r, -r],
+    ] as const) {
+      const nx = wrapX(x + dx, w)
+      const ny = y + dy
+      if (ny < 0 || ny >= h) continue
+      if (elev[idx(w, nx, ny)] < seaLevel) best = Math.max(best, weight)
+    }
+    if (best >= 0.9) break
+  }
+  return best
+}
+
+/**
+ * Crude Earth-like wind cells along latitude:
+ *   tropics  → easterlies (air arrives from the east)
+ *   mid-lats → westerlies (air arrives from the west)
+ *   polar    → easterlies again
+ * Returns +1 when wind blows west→east, −1 when east→west.
+ */
+function windDirForPole(pole: number): 1 | -1 {
+  if (pole < 0.28 || pole >= 0.62) return -1
+  return 1
+}
+
 /** Fill temp[] and moist[] from the heightfield. Call after you change elev. */
 export function recomputeClimate(world: World): void {
   const { width: w, height: h, elev, seaLevel, temp, moist } = world
 
   for (let y = 0; y < h; y++) {
     const lat = climateLat(world, y)
-    // Latitude bands: wet tropics/mid, drier horse latitudes, wet temperate, dry poles
-    const band =
-      0.55 +
-      0.35 * Math.cos((lat - 0.5) * Math.PI * 2.2) -
-      0.25 * Math.pow(Math.abs(lat - 0.5) * 2, 1.4)
+    const pole = Math.abs(lat - 0.5) * 2
+    // Wet ITCZ + mid-lats; drier horse latitudes (~30°) and poles.
+    const band = Math.max(
+      0.28,
+      0.62 + 0.28 * Math.cos(pole * Math.PI * 1.7) - 0.2 * Math.pow(pole, 1.65),
+    )
+    // Soft equator→pole curve (was too steep, freezing mid-lats).
+    const latTemp = 1 - Math.pow(pole, 1.05)
+    const windDir = windDirForPole(pole)
 
-    const latTemp = 1 - Math.pow(Math.abs(lat - 0.5) * 2, 1.15)
-
-    // Temperature does not depend on wind — fill first.
     for (let x = 0; x < w; x++) {
       const i = idx(w, x, y)
-      const above = Math.max(0, elev[i] - seaLevel)
-      temp[i] = Math.max(0, Math.min(1, latTemp - above * 1.35))
+      const e = elev[i]
+      if (e < seaLevel) {
+        // Open ocean tracks latitude, slightly buffered.
+        temp[i] = Math.max(0, Math.min(1, latTemp * 0.94 + 0.06))
+        continue
+      }
+      const above = Math.max(0, e - seaLevel)
+      const maritime = maritimeFactor(world, x, y)
+      // ~Earth lapse mapped onto our elev range — not "every hill is Everest".
+      const lapse = above * (0.4 - maritime * 0.15)
+      temp[i] = Math.max(0, Math.min(1, latTemp - lapse + maritime * 0.12))
     }
 
     /**
-     * Cylinder-safe moisture: walk the row once to prime airMoisture so the
-     * value arriving at x=0 matches what left x=w-1, then walk again to write.
+     * Cylinder-safe moisture along the wind: prime air once around the row,
+     * then write precip. Windward rise dumps rain; lee stays drier.
      */
+    const windwardX = (x: number) => wrapX(x - windDir, w)
+
     const stepAir = (air: number, x: number): number => {
       const e = elev[idx(w, x, y)]
       const above = Math.max(0, e - seaLevel)
-      if (e < seaLevel) return Math.min(1, air + 0.04)
-      const prevE = elev[idx(w, wrapX(x - 1, w), y)]
+      if (e < seaLevel) return Math.min(1, air + 0.12)
+      const prevE = elev[idx(w, windwardX(x), y)]
       const rise = Math.max(0, e - prevE)
-      const orographic = rise * 4.5
-      return Math.max(0.05, air - orographic * 1.8 - above * 0.08 + (1 - above) * 0.01)
+      const orographic = rise * 1.8
+      return Math.max(0.18, air - orographic * 0.85 - above * 0.035 + (1 - above) * 0.02)
     }
 
     let airMoisture = band
-    for (let x = 0; x < w; x++) airMoisture = stepAir(airMoisture, x)
+    if (windDir === 1) {
+      for (let x = 0; x < w; x++) airMoisture = stepAir(airMoisture, x)
+    } else {
+      for (let x = w - 1; x >= 0; x--) airMoisture = stepAir(airMoisture, x)
+    }
 
-    for (let x = 0; x < w; x++) {
+    const writeCell = (x: number) => {
       const i = idx(w, x, y)
       const e = elev[i]
       const above = Math.max(0, e - seaLevel)
 
       if (e < seaLevel) {
         moist[i] = 1
-        airMoisture = Math.min(1, airMoisture + 0.04)
-        continue
+        airMoisture = Math.min(1, airMoisture + 0.12)
+        return
       }
 
-      const prevE = elev[idx(w, wrapX(x - 1, w), y)]
+      const prevE = elev[idx(w, windwardX(x), y)]
       const rise = Math.max(0, e - prevE)
-      const orographic = rise * 4.5
-      const localPrecip = Math.max(0, airMoisture * 0.55 + orographic - above * 0.15)
+      const orographic = rise * 1.8
+      const maritime = maritimeFactor(world, x, y)
+      const localPrecip = Math.max(
+        0,
+        airMoisture * 0.82 + orographic * 0.55 - above * 0.06 + maritime * 0.08,
+      )
       moist[i] = Math.max(0, Math.min(1, localPrecip))
 
       airMoisture = Math.max(
-        0.05,
-        airMoisture - orographic * 1.8 - above * 0.08 + (1 - above) * 0.01,
+        0.18,
+        airMoisture - orographic * 0.85 - above * 0.035 + (1 - above) * 0.02,
       )
+    }
+
+    if (windDir === 1) {
+      for (let x = 0; x < w; x++) writeCell(x)
+    } else {
+      for (let x = w - 1; x >= 0; x--) writeCell(x)
     }
   }
 }

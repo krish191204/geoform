@@ -126,8 +126,8 @@ const LAYER_COACH: Record<string, CoachMessage> = {
   },
   plates: {
     title: 'Plates look',
-    tip: 'Tectonic plate IDs. Mountains prefer plate edges.',
-    next: 'Refresh climate (with sculpt on Local) rebuilds ranges along sutures.',
+    tip: 'Colored plates with dark sutures. Warm edges = collision ranges; cool edges = rifts. Highlands lighten on the fill.',
+    next: 'Switch to Relief to see the same mountains as terrain. Refresh climate rebuilds ranges along sutures.',
     tone: 'tip',
   },
   suitability: {

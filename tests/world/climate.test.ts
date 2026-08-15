@@ -49,21 +49,54 @@ describe('climate wrap + drainage', () => {
     const h = 12
     const world = blankWorld(w, h, 0.4)
     world.elev.fill(0.15)
-    // Tall ridge on the last column. Wind wraps onto x=0..2 as the lee side.
-    for (let y = 2; y < h - 2; y++) {
-      world.elev[y * w + (w - 1)] = 0.88
-      world.elev[y * w + 0] = 0.5
-      world.elev[y * w + 1] = 0.5
-      world.elev[y * w + 2] = 0.5
+    // Mid-latitude row uses westerlies (west→east), so a ridge at x=w-1
+    // casts a rain shadow onto x=0..2 across the date line.
+    const y = 3
+    for (let yy = 2; yy < h - 2; yy++) {
+      world.elev[yy * w + (w - 1)] = 0.88
+      world.elev[yy * w + 0] = 0.5
+      world.elev[yy * w + 1] = 0.5
+      world.elev[yy * w + 2] = 0.5
       // Same-height land with a long ocean fetch to the west (no wrap ridge).
-      world.elev[y * w + 16] = 0.5
-      world.elev[y * w + 17] = 0.5
+      world.elev[yy * w + 16] = 0.5
+      world.elev[yy * w + 17] = 0.5
     }
     recomputeClimate(world)
-    const y = (h / 2) | 0
     const leeOfWrap = world.moist[y * w + 1]
     const openFetch = world.moist[y * w + 16]
     expect(leeOfWrap).toBeLessThan(openFetch)
+  })
+
+  it('new worlds are not mostly ice+desert (temperate biomes exist)', () => {
+    for (const seed of [3, 21, 88, 241]) {
+      const world = generateWorld(128, 64, seed, 0.4, 'continents')
+      const counts: Record<string, number> = {}
+      let land = 0
+      let moistSum = 0
+      let tempSum = 0
+      for (let i = 0; i < world.elev.length; i++) {
+        if (world.elev[i] < world.seaLevel) continue
+        land++
+        moistSum += world.moist[i]
+        tempSum += world.temp[i]
+        const b = world.biome[i]
+        counts[b] = (counts[b] ?? 0) + 1
+      }
+      expect(land).toBeGreaterThan(200)
+      const medianishMoist = moistSum / land
+      const meanTemp = tempSum / land
+      expect(medianishMoist).toBeGreaterThan(0.22)
+      expect(meanTemp).toBeGreaterThan(0.28)
+      const harsh = (counts.ice ?? 0) + (counts.desert ?? 0)
+      const living =
+        (counts.grassland ?? 0) +
+        (counts.forest ?? 0) +
+        (counts.savanna ?? 0) +
+        (counts.taiga ?? 0) +
+        (counts.rainforest ?? 0)
+      expect(harsh / land).toBeLessThan(0.55)
+      expect(living / land).toBeGreaterThan(0.25)
+    }
   })
 
   it('ensureDrainage opens a path out of a closed basin', () => {

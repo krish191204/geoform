@@ -55,9 +55,10 @@ function heat(t: number): [number, number, number] {
 }
 
 function moistureColor(m: number): [number, number, number] {
-  if (m < 0.35) return mix([196, 150, 88], [170, 140, 70], m / 0.35)
-  if (m < 0.65) return mix([170, 140, 70], [70, 130, 90], (m - 0.35) / 0.3)
-  return mix([70, 130, 90], [30, 100, 140], (m - 0.65) / 0.35)
+  // Sand only for true aridity — mid values should read as grassland green.
+  if (m < 0.18) return mix([196, 150, 88], [170, 140, 70], m / 0.18)
+  if (m < 0.45) return mix([170, 140, 70], [70, 130, 90], (m - 0.18) / 0.27)
+  return mix([70, 130, 90], [30, 100, 140], (m - 0.45) / 0.55)
 }
 
 function suitColor(s: number): [number, number, number] {
@@ -112,6 +113,44 @@ function isCoast(world: World, x: number, y: number): boolean {
   return false
 }
 
+const wrapX = (x: number, w: number) => ((x % w) + w) % w
+
+/**
+ * Plate suture info for the Plates look: edge ink + collision vs rift kinematics.
+ * approach > 0 = converging (orogeny), < 0 = diverging (rift).
+ */
+export function plateBoundaryCue(
+  world: World,
+  x: number,
+  y: number,
+): { edge: boolean; approach: number } {
+  const { width: w, height: h, plateId, plateVx, plateVy } = world
+  const i = y * w + x
+  const p = plateId[i]
+  let edge = false
+  let approach = 0
+  for (const [dx, dy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    const nx = wrapX(x + dx, w)
+    const ny = y + dy
+    if (ny < 0 || ny >= h) continue
+    const q = plateId[ny * w + nx]
+    if (q === p) continue
+    edge = true
+    const vx = plateVx?.[p] ?? 0
+    const vy = plateVy?.[p] ?? 0
+    const qx = plateVx?.[q] ?? 0
+    const qy = plateVy?.[q] ?? 0
+    const len = Math.hypot(dx, dy) || 1
+    approach = Math.max(approach, -((vx - qx) * dx + (vy - qy) * dy) / len)
+  }
+  return { edge, approach }
+}
+
 function cellColor(
   world: World,
   layer: Layer,
@@ -133,7 +172,25 @@ function cellColor(
     case 'plates': {
       const p = world.plateId[i] % PLATE_PALETTE.length
       rgb = [...PLATE_PALETTE[p]] as [number, number, number]
-      if (e < seaLevel) rgb = mix(rgb, [20, 50, 70], 0.55)
+      if (e < seaLevel) {
+        rgb = mix(rgb, [20, 50, 70], 0.55)
+      } else {
+        // Show collision ranges / highlands on the plate fill (not flat paint).
+        const above = Math.max(0, (e - seaLevel) / Math.max(0.01, 1 - seaLevel))
+        if (above > 0.08) {
+          rgb = mix(rgb, [232, 220, 200], Math.min(0.72, above * 0.95))
+        }
+      }
+      const { edge, approach } = plateBoundaryCue(world, x, y)
+      if (edge) {
+        // Dark suture so plate contacts read; warm = crash, cool = pull-apart.
+        rgb = mix(rgb, [18, 22, 28], 0.42)
+        if (approach > 0.02) {
+          rgb = mix(rgb, [210, 150, 90], Math.min(0.55, 0.22 + approach * 0.9))
+        } else if (approach < -0.02) {
+          rgb = mix(rgb, [70, 120, 160], Math.min(0.45, 0.18 + -approach * 0.8))
+        }
+      }
       break
     }
     case 'moisture':
@@ -152,15 +209,15 @@ function cellColor(
       rgb = elevColor(e, seaLevel)
   }
 
-  // Hillshade on relief / biome / elevation for depth
-  if (layer === 'relief' || layer === 'biome' || layer === 'elevation') {
+  // Hillshade on relief / biome / elevation / plates for depth
+  if (layer === 'relief' || layer === 'biome' || layer === 'elevation' || layer === 'plates') {
     const er = sampleElev(world, Math.min(w - 1.001, x + 1), y)
     const ed = sampleElev(world, x, Math.min(h - 1.001, y + 1))
     const dx = e - er
     const dy = e - ed
     // Soft directional light from NW
     const shade = 0.72 + dx * 4.2 + dy * 3.0
-    const ambient = layer === 'biome' ? 0.55 : 0.35
+    const ambient = layer === 'biome' ? 0.55 : layer === 'plates' ? 0.48 : 0.35
     const lit = ambient + (1 - ambient) * clamp(shade, 0.45, 1.35) / 1.15
     rgb = [clamp(rgb[0] * lit), clamp(rgb[1] * lit), clamp(rgb[2] * lit)]
   }
@@ -553,10 +610,6 @@ function strokeRoute(
   ctx.stroke()
   ctx.setLineDash([])
   ctx.restore()
-}
-
-function wrapX(x: number, w: number): number {
-  return ((x % w) + w) % w
 }
 
 interface WindParticle {

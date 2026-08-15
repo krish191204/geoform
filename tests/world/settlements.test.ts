@@ -38,7 +38,8 @@ describe('settlement roles', () => {
     expect(farms.length).toBeGreaterThan(0)
     expect(farms.every((c) => c.role === 'farmland')).toBe(true)
     const role = inferSettlementRole(world, farms[0].x, farms[0].y)
-    expect(['farmland', 'pastoral', 'trade']).toContain(role)
+    // Mild climates can score the same cell as a capital — still a living-land role.
+    expect(['farmland', 'pastoral', 'trade', 'seat_of_power']).toContain(role)
   })
 
   it('scales settlement count with coverage slider', () => {
