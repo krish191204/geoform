@@ -126,8 +126,8 @@ const LAYER_COACH: Record<string, CoachMessage> = {
   },
   plates: {
     title: 'Plates look',
-    tip: 'Colored plates with dark sutures. Warm edges = collision ranges; cool edges = rifts. Highlands lighten on the fill.',
-    next: 'Switch to Relief to see the same mountains as terrain. Refresh climate rebuilds ranges along sutures.',
+    tip: 'Colored plates with dark sutures. Raise / Land / Ridge claim crust under your brush so plates follow what you sculpt. Warm edges = collision; cool = rift.',
+    next: 'Flooding with Ocean keeps the same plate underwater. Refresh climate rebuilds collision ranges along sutures.',
     tone: 'tip',
   },
   suitability: {

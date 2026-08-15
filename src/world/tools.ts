@@ -9,9 +9,10 @@
  * mountain along the stroke. Channel is ridge but downward (a valley).
  * Sea / land push cells below or above the water line.
  *
- * After a stroke the editor asks climate.ts to rebuild weather. We do not
- * reshape continents on every dab — that would eat your rectangle while
- * you are still drawing it. Refresh geography does that later.
+ * After a stroke the editor asks climate.ts to rebuild weather. Land-raising
+ * brushes also claim plateId under the stroke so Plates view tracks the
+ * crust you are sculpting. We still do not reshape whole continents on every
+ * dab — Refresh geography does that later.
  */
 import { fbm } from './noise'
 import { suggestSettlementMix } from './settlements'
@@ -224,6 +225,67 @@ export function brushSeaLevel(
       const i = idx(w, x, y)
       elev[i] = elev[i] + (target - elev[i]) * strength * wt
       elev[i] = Math.max(0, Math.min(1, elev[i]))
+    }
+  }
+}
+
+const wrapX = (x: number, w: number) => ((x % w) + w) % w
+
+/**
+ * Which plate "owns" the crust under the brush: prefer land at the cursor,
+ * else the nearest land plate so ocean→land paint extends a real continent.
+ */
+function claimPlateAt(world: World, cx: number, cy: number): number {
+  const { width: w, height: h, elev, seaLevel, plateId } = world
+  const x0 = Math.max(0, Math.min(w - 1, cx | 0))
+  const y0 = Math.max(0, Math.min(h - 1, cy | 0))
+  const i0 = idx(w, x0, y0)
+  if (elev[i0] >= seaLevel) return plateId[i0]
+
+  let best = plateId[i0]
+  let bestD = Infinity
+  const R = 14
+  for (let y = Math.max(0, y0 - R); y <= Math.min(h - 1, y0 + R); y++) {
+    for (let x = x0 - R; x <= x0 + R; x++) {
+      const nx = wrapX(x, w)
+      const i = idx(w, nx, y)
+      if (elev[i] < seaLevel) continue
+      const dx = Math.min(Math.abs(nx - x0), w - Math.abs(nx - x0))
+      const dy = y - y0
+      const d = dx * dx + dy * dy
+      if (d < bestD) {
+        bestD = d
+        best = plateId[i]
+      }
+    }
+  }
+  return best
+}
+
+/**
+ * After raising / painting land, assign plateId under the brush so Plates
+ * view follows the world you are sculpting (not a frozen New-world stamp).
+ * Flooded ocean keeps its plate (same crust, now underwater).
+ */
+export function syncPlatesUnderBrush(
+  world: World,
+  cx: number,
+  cy: number,
+  radius: number,
+  softness: number,
+): void {
+  const { width: w, height: h, elev, seaLevel, plateId } = world
+  if (!plateId.length) return
+  const claim = claimPlateAt(world, cx, cy)
+  const r = Math.max(1, radius)
+  const pad = Math.ceil(r * 0.5)
+  for (let y = Math.max(0, cy - r - pad); y <= Math.min(h - 1, cy + r + pad); y++) {
+    for (let x = Math.max(0, cx - r - pad); x <= Math.min(w - 1, cx + r + pad); x++) {
+      const wt = weight(x - cx, y - cy, r, softness, x, y, world.seed + 3)
+      // Only the solid core of the stroke moves plate ownership.
+      if (wt < 0.22) continue
+      const i = idx(w, x, y)
+      if (elev[i] >= seaLevel) plateId[i] = claim
     }
   }
 }

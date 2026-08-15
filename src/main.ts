@@ -77,6 +77,7 @@ import {
   brushRidge,
   brushSeaLevel,
   brushSmooth,
+  syncPlatesUnderBrush,
   removeNearestCity,
 } from './world/tools'
 import {
@@ -2006,6 +2007,7 @@ function bind() {
     switch (tool) {
       case 'raise':
         brushRaise(world, cell.x, cell.y, brush, strength, softness)
+        syncPlatesUnderBrush(world, cell.x, cell.y, brush, softness)
         break
       case 'lower':
         brushRaise(world, cell.x, cell.y, brush, -strength, softness)
@@ -2015,18 +2017,22 @@ function bind() {
         break
       case 'ridge':
         brushRidge(world, cell.x, cell.y, brush, strength * 1.35, softness, strokeDirX, strokeDirY)
+        syncPlatesUnderBrush(world, cell.x, cell.y, brush, softness)
         break
       case 'channel':
         brushChannel(world, cell.x, cell.y, brush, strength, softness, strokeDirX, strokeDirY)
+        syncPlatesUnderBrush(world, cell.x, cell.y, brush, softness)
         break
       case 'plateau':
         brushPlateau(world, cell.x, cell.y, brush, Math.min(1, strength * 3), softness)
+        syncPlatesUnderBrush(world, cell.x, cell.y, brush, softness)
         break
       case 'sea':
         brushSeaLevel(world, cell.x, cell.y, brush, true, Math.min(1, strength * 3), softness)
         break
       case 'land':
         brushSeaLevel(world, cell.x, cell.y, brush, false, Math.min(1, strength * 3), softness)
+        syncPlatesUnderBrush(world, cell.x, cell.y, brush, softness)
         break
       default:
         break
