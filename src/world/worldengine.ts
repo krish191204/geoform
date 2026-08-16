@@ -56,6 +56,7 @@ export function worldFromPayload(
     originY: frame?.originY ?? 0,
     latRows: frame?.latRows ?? payload.height,
     continentMass: DEFAULT_CONTINENT_MASS,
+    planetRadiusKm: 6371,
   }
   world.landRatio = frame?.landRatio ?? landFraction(world.elev, world.seaLevel)
   ensurePlateMotion(world)

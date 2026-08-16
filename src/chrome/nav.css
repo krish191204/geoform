@@ -32,7 +32,7 @@
 }
 
 .nav-links a {
-  border: 1px solid rgba(20, 32, 28, 0.14);
+  border: 1px solid rgba(20, 32, 28, 0.12);
   background: rgba(255, 255, 255, 0.45);
   color: var(--ink);
   border-radius: 999px;
@@ -40,9 +40,26 @@
   font: inherit;
   font-weight: 500;
   text-decoration: none;
+  transition:
+    background 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    color 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    border-color 180ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.nav-links a:hover,
+.nav-links a:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav-links a:hover {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+    text-decoration: none;
+  }
+}
+
 .nav-links a.active {
   background: var(--ink);
   color: var(--paper);

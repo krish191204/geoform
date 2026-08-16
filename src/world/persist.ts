@@ -45,6 +45,7 @@ export interface SavedWorld {
   continentMass?: 'continents' | 'mixed' | 'islands'
   plateVx?: number[]
   plateVy?: number[]
+  planetRadiusKm?: number
 }
 
 /** Snapshot a World as JSON-friendly arrays. This is the Save file. */
@@ -79,6 +80,7 @@ export function serializeWorld(world: World): SavedWorld {
     continentMass: world.continentMass,
     plateVx: Array.from(world.plateVx),
     plateVy: Array.from(world.plateVy),
+    planetRadiusKm: world.planetRadiusKm,
   }
 }
 
@@ -120,6 +122,7 @@ export function deserializeWorld(data: SavedWorld, opts?: { repair?: boolean }):
     continentMass: DEFAULT_CONTINENT_MASS,
     plateVx: Float32Array.from(data.plateVx ?? []),
     plateVy: Float32Array.from(data.plateVy ?? []),
+    planetRadiusKm: data.planetRadiusKm ?? 6371,
   }
   world.landRatio = data.landRatio ?? landFraction(world.elev, world.seaLevel)
   world.continentMass = clampContinentMass(data.continentMass)

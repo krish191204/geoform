@@ -25,8 +25,64 @@ import {
 } from './mass'
 import { createRng, fbm } from './noise'
 import type { Biome, City, World } from './types'
+import {
+  clampPlanetRadiusKm,
+  PLANET_RADIUS_DEFAULT_KM,
+} from './stages'
 
 const idx = (w: number, x: number, y: number) => y * w + x
+
+/**
+ * Empty ocean canvas for Sketch. No continents — paint whatever you want.
+ */
+export function createEmptySeaWorld(
+  width: number,
+  height: number,
+  seed: number,
+  planetRadiusKm = PLANET_RADIUS_DEFAULT_KM,
+): World {
+  const n = width * height
+  const seaLevel = 0.42
+  const elev = new Float32Array(n)
+  // Deep, even ocean with tiny floor noise so it isn't a flat graphic.
+  for (let i = 0; i < n; i++) {
+    const x = i % width
+    const y = (i / width) | 0
+    elev[i] = seaLevel - 0.12 - fbm(x / 40, y / 28, seed + 2, 3) * 0.04
+  }
+  const plateId = new Int16Array(n)
+  const world: World = {
+    width,
+    height,
+    seed,
+    seaLevel,
+    landRatio: 0.35,
+    continentMass: 'continents',
+    plateId,
+    elev,
+    temp: new Float32Array(n),
+    moist: new Float32Array(n),
+    flux: new Float32Array(n),
+    biome: Array.from({ length: n }, () => 'ocean'),
+    suitability: new Float32Array(n),
+    cities: [],
+    tradeRoutes: [],
+    plateCount: 1,
+    plateVx: new Float32Array([0]),
+    plateVy: new Float32Array([0]),
+    rawElevMin: 0,
+    rawElevMax: 1,
+    rawSeaThreshold: seaLevel,
+    engine: 'local',
+    originX: 0,
+    originY: 0,
+    latRows: height,
+    planetRadiusKm: clampPlanetRadiusKm(planetRadiusKm),
+  }
+  // Light climate so ocean reads wet/warm; no land to reshape.
+  recomputeDerived(world, false)
+  return world
+}
 
 /** One tectonic plate: a center, a slide direction, and "is this a continent plate?" */
 interface Plate {
@@ -295,6 +351,7 @@ export function generateWorld(
     originY: 0,
     // Freeze latitude against later zoom-out padding.
     latRows: height,
+    planetRadiusKm: PLANET_RADIUS_DEFAULT_KM,
   }
 
   applyLandRatio(world, land)

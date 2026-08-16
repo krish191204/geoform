@@ -363,6 +363,7 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
   if (world.biome && world.moist) {
     let desertWet = 0
     let rainforestDry = 0
+    let iceDesertAdj = 0
     let px = 0
     let py = 0
     for (let i = 0; i < world.biome.length; i++) {
@@ -374,10 +375,42 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
         px = i % w
         py = (i / w) | 0
       }
-      if (b.includes('rain forest') && m < 0.25) {
+      if ((b.includes('rain forest') || b === 'rainforest') && m < 0.25) {
         rainforestDry++
         px = i % w
         py = (i / w) | 0
+      }
+    }
+    // Ice next to hot desert — Donald dualism (mid-lat nonsense).
+    if (world.biome && world.temp) {
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = idx(x, y, w)
+          if (elev[i] < sea) continue
+          const b = world.biome[i].toLowerCase()
+          const iceHere = b.includes('ice') || b === 'tundra'
+          if (!iceHere) continue
+          for (const [dx, dy] of [
+            [1, 0],
+            [-1, 0],
+            [0, 1],
+            [0, -1],
+          ] as const) {
+            const nx = (x + dx + w) % w
+            const ny = y + dy
+            if (ny < 0 || ny >= h) continue
+            const j = idx(nx, ny, w)
+            if (elev[j] < sea) continue
+            const nb = world.biome[j].toLowerCase()
+            if (!nb.includes('desert')) continue
+            // Only flag when desert cell is warm enough that ice↔sand is absurd.
+            if ((world.temp?.[j] ?? 0.5) > 0.4) {
+              iceDesertAdj++
+              px = x
+              py = y
+            }
+          }
+        }
       }
     }
     if (desertWet > w * h * 0.01) {
@@ -402,6 +435,19 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
         fix: 'Align Holdridge / biome rules with the moisture grid.',
         at: { x: px / w, y: py / h },
         confidence: 0.75,
+      })
+    }
+    if (iceDesertAdj > 12) {
+      issues.push({
+        id: nextId(),
+        severity: 'critical',
+        kind: 'climate',
+        title: 'Ice next to desert',
+        critique: `${iceDesertAdj} ice/tundra cells sit beside warm desert. Mid-latitude ice↔sand dualism is not a believable climate — check lapse, moisture bands, and mountain height.`,
+        fix: 'Soften extreme peaks, rebuild climate from height, or apply the ice↔desert alternative.',
+        at: { x: px / w, y: py / h },
+        confidence: 0.8,
+        evidence: 'Adjacent ice/tundra and warm desert cells',
       })
     }
   }
@@ -520,4 +566,35 @@ export function critiqueGrid(world: GridWorld, source: CritiqueResult['source'])
     moist: moistOut,
     water,
   }
+}
+
+/** Grade the live editor World without a JSON round-trip. */
+export function critiqueLiveWorld(world: {
+  width: number
+  height: number
+  elev: Float32Array | number[]
+  temp?: Float32Array | number[]
+  moist?: Float32Array | number[]
+  flux?: Float32Array | number[]
+  biome?: string[]
+  cities?: { x: number; y: number; name: string; score?: number }[]
+  seaLevel?: number
+  seed?: number
+}): CritiqueResult {
+  return critiqueGrid(
+    {
+      width: world.width,
+      height: world.height,
+      elev: world.elev,
+      temp: world.temp,
+      moist: world.moist,
+      flux: world.flux,
+      biome: world.biome,
+      cities: world.cities,
+      seaLevel: world.seaLevel,
+      seed: world.seed,
+      label: `Live world${world.seed != null ? ` · seed ${world.seed}` : ''}`,
+    },
+    'geoform-json',
+  )
 }

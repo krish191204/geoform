@@ -22,6 +22,7 @@ import {
   coachLandRatio,
   coachLayer,
   coachMass,
+  coachStage,
   coachTimeline,
   coachTool,
   coachView,
@@ -61,13 +62,12 @@ import {
   gatePresentEdit,
   gateRazeCity,
 } from './world/placement'
-import { generateWorld, nextCityName } from './world/generate'
+import { createEmptySeaWorld, nextCityName } from './world/generate'
 import { EditHistory } from './world/history'
 import {
   autosaveWorld,
   clearAutosave,
   downloadWorld,
-  loadAutosave,
   readWorldFile,
 } from './world/persist'
 import {
@@ -121,11 +121,24 @@ import {
   SEA_NAV_LABEL,
   suggestTradeRoutes,
 } from './world/tradeRoutes'
-import { fetchWorldEngineWorld, recomputeWorldEngine } from './world/worldengine'
+import { recomputeWorldEngine } from './world/worldengine'
 import { MapRenderer, screenToCell, type MapLook } from './render/draw'
 import { downloadMapPng } from './render/exportMap'
 import type { PlanetView } from './render/globe'
 import type { Layer, Tool, World } from './world/types'
+import { critiqueLiveWorld } from './critique/analyzeWorld'
+import type { CritiqueResult } from './critique/types'
+import { KIND_LABEL, SEVERITY_LABEL } from './critique/types'
+import { harmonizeToGeography } from './world/harmonize'
+import {
+  clampPlanetRadiusKm,
+  PLANET_RADIUS_DEFAULT_KM,
+  PLANET_RADIUS_MAX_KM,
+  PLANET_RADIUS_MIN_KM,
+  stageAllowsSettlements,
+  UX_STAGES,
+  type UxStage,
+} from './world/stages'
 
 let mapQuality: MapQuality = loadMapQuality()
 
@@ -152,9 +165,12 @@ const TERRAIN_TOOLS: Tool[] = [
 let seed = (Math.random() * 1e9) | 0
 let landRatio = DEFAULT_LAND_RATIO
 let continentMass: ContinentMass = DEFAULT_CONTINENT_MASS
+let planetRadiusKm = PLANET_RADIUS_DEFAULT_KM
 let world: World | null = null
 let layer: Layer = 'relief'
-let tool: Tool = 'raise'
+let tool: Tool = 'land'
+let uxStage: UxStage = 'sketch'
+let lastCritique: CritiqueResult | null = null
 let continentStyle: ContinentStyle = 'collision'
 let brush = 6
 let strength = 0.09
@@ -233,15 +249,8 @@ function wantsContinuousAnimation(): boolean {
   ) {
     return false
   }
+  // Idle water shimmer is expensive on HD — only pulse when cities exist.
   if (viewMode === 'atlas') {
-    if (
-      layer === 'relief' ||
-      layer === 'biome' ||
-      layer === 'elevation' ||
-      layer === 'moisture'
-    ) {
-      return true
-    }
     return timelineAge < 8 && world.cities.length > 0
   }
   return false
@@ -365,39 +374,48 @@ function applyWorld(next: World, message: string) {
   seed = next.seed
   landRatio = next.landRatio
   continentMass = clampContinentMass(next.continentMass)
+  planetRadiusKm = clampPlanetRadiusKm(next.planetRadiusKm ?? planetRadiusKm)
+  next.planetRadiusKm = planetRadiusKm
   timelineAge = 0
   timelineView = null
   history.clear()
   resetView()
   const seedInput = document.querySelector<HTMLInputElement>('#seed')
   if (seedInput) seedInput.value = String(seed)
+  const radiusInput = document.querySelector<HTMLInputElement>('#planetRadius')
+  if (radiusInput) radiusInput.value = String(planetRadiusKm)
+  const radiusVal = document.querySelector('#radiusVal')
+  if (radiusVal) radiusVal.textContent = String(planetRadiusKm)
   syncLandRatioUi()
   syncMassUi()
   syncTimelineUi()
-  // WorldEngine already shipped climate — keep it; ensure rivers show on the atlas.
+  // Empty-sea sketches and WorldEngine: don't reshape continents on load.
   if (next.engine === 'worldengine') {
     ensurePlateMotion(next)
     ensureVisibleHydrology(next)
     recomputeSuitability(next)
   } else {
-    refreshGeography(next, { sculpt: false })
+    recomputeDerived(next, false)
   }
   mapPaintPending = true
   setBusy(true, 'Rendering map…')
   invalidateRenderer()
   queueMicrotask(() => requestRepaint())
   announceChange(
-    'A new planet is on the map',
-    `${message} This replaced the previous world. Rivers and plants were calculated from the new heights — they were not drawn by hand.`,
-    'Pick Raise or Ridge and drag on green/brown land. After you release, this box will say what else changed.',
+    message.includes('Empty') ? 'Empty ocean' : 'Map loaded',
+    `${message}`,
+    'Paint with Land or Raise. Critique when you are ready.',
   )
-  setClimatePhase('idle')
-  updateInspector()
-  updateGeoFlags()
+  setStatus(message)
   updateCities()
   updateSettlementDensityHint()
+  updateInspector()
   updateHistoryButtons()
   scheduleAutosave()
+  setBusy(false)
+  mapPaintPending = false
+  setClimatePhase('idle')
+  updateGeoFlags()
 }
 
 function resetView() {
@@ -766,7 +784,7 @@ function hideConfirm() {
 
 function askNewWorld(run: () => void) {
   if (isTutorialBlocking()) {
-    setStatus('Finish the tutorial before generating a new world.')
+    setStatus('Finish the tutorial first.')
     return
   }
   if (!world?.cities.length) {
@@ -781,10 +799,10 @@ function askNewWorld(run: () => void) {
   }
   banner.hidden = false
   banner.innerHTML = `
-    <strong>Generate a new world?</strong>
-    <p>This map and its cities will be replaced. Export first if you want a copy.</p>
+    <strong>Clear the sea?</strong>
+    <p>This wipes the map back to empty ocean. Export first if you want a copy.</p>
     <div class="banner-actions">
-      <button type="button" class="chip primary-chip" id="confirmOk">New world</button>
+      <button type="button" class="chip primary-chip" id="confirmOk">Clear sea</button>
       <button type="button" class="chip" id="confirmCancel">Keep this one</button>
     </div>
   `
@@ -823,105 +841,108 @@ function renderShell() {
           <span id="saveMeta" class="save-meta">No save yet</span>
         </div>
       </details>
-      <button type="button" id="regen" class="primary">New world</button>
+      <button type="button" id="regen" class="primary">Clear sea</button>
     </div>
   `
 
   app.innerHTML = `
     <header class="chrome">
       ${navHtml('editor', worldTrailing)}
+      <nav class="ux-stage-rail" id="uxStageRail" aria-label="Worldbuilding stages">
+        ${UX_STAGES.map(
+          (s) => `
+          <button type="button" class="ux-stage-btn ${s.id === uxStage ? 'active' : ''}" data-stage="${s.id}">
+            <small>${s.num}</small>
+            <strong>${s.title}</strong>
+          </button>`,
+        ).join('')}
+      </nav>
     </header>
     <div class="layout">
       <aside class="panel tools-panel">
-        <h2>Tools</h2>
-        <div class="tool-grid" id="tools"></div>
+        <div id="sketchTools">
+          <h2>Draw</h2>
+          <div class="tool-grid" id="tools"></div>
+          <div class="slider-row">
+            <label>Brush · <span id="brushVal">${brush}</span></label>
+            <input id="brush" type="range" min="1" max="22" value="${brush}" />
+          </div>
+          <div class="slider-row">
+            <label>Strength · <span id="strengthVal">${Math.round(strength * 100)}</span></label>
+            <input id="strength" type="range" min="2" max="24" value="${Math.round(strength * 100)}" />
+          </div>
+          <div class="slider-row">
+            <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
+            <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
+          </div>
+          <div class="slider-row">
+            <label>Planet radius · <span id="radiusVal">${planetRadiusKm}</span> km</label>
+            <input
+              id="planetRadius"
+              type="range"
+              min="${PLANET_RADIUS_MIN_KM}"
+              max="${PLANET_RADIUS_MAX_KM}"
+              step="50"
+              value="${planetRadiusKm}"
+            />
+          </div>
+          <p class="hint">Empty ocean. Draw land with Land / Raise / Ridge. Clear sea wipes the canvas.</p>
+        </div>
 
-        <div class="slider-row">
-          <label>Brush · <span id="brushVal">${brush}</span></label>
-          <input id="brush" type="range" min="1" max="22" value="${brush}" />
-        </div>
-        <div class="slider-row">
-          <label>Strength · <span id="strengthVal">${Math.round(strength * 100)}</span></label>
-          <input id="strength" type="range" min="2" max="24" value="${Math.round(strength * 100)}" />
-        </div>
-        <div class="slider-row">
-          <label>Softness · <span id="softVal">${Math.round(softness * 100)}</span>%</label>
-          <input id="softness" type="range" min="20" max="100" value="${Math.round(softness * 100)}" />
-        </div>
-        <h3>Landmass</h3>
-        <div class="style-grid" id="massStyles"></div>
-        <p class="hint">Full continents by default. Island world is the speckle look — only if you want it. New worlds follow this; paint still does what you do.</p>
-        <div class="slider-row">
-          <label>Land · <span id="landVal">${Math.round(landRatio * 100)}</span>% · Water · <span id="waterVal">${Math.round((1 - landRatio) * 100)}</span>%</label>
+        <!-- Kept in DOM for bind(); hidden outside advanced world menu / worldbuild -->
+        <div id="advancedGen" hidden>
+          <div class="style-grid" id="massStyles"></div>
           <input id="landRatio" type="range" min="12" max="72" value="${Math.round(landRatio * 100)}" />
-        </div>
-        <p class="hint">Flood or expose coasts. New worlds and zoom-out ocean follow this mix.</p>
-
-        <h3>Deep time</h3>
-        <div class="slider-row">
-          <label>Age · <span id="ageVal">Present</span></label>
           <input id="timeline" type="range" min="0" max="200" value="0" />
-        </div>
-        <p class="hint">Pull back to see how today’s continents sat earlier — mountains and climate rebuild for that age.</p>
-
-        <h3>Continents</h3>
-        <div class="style-grid" id="continentStyles"></div>
-        <div class="action-row">
+          <div class="style-grid" id="continentStyles"></div>
           <button type="button" id="autoContinent">Auto-place</button>
-        </div>
-        <p class="hint" id="continentHint">Pick a style, then use Add continent on the map — or Auto-place in open ocean.</p>
-
-        <h3>Quality</h3>
-        <label class="quality-row">
-          Map detail
-          <select id="mapQuality" aria-label="Map quality for new worlds">
+          <p class="hint" id="continentHint" hidden></p>
+          <select id="mapQuality" aria-label="Map quality" hidden>
             ${Object.values(QUALITY_PRESETS)
               .map(
                 (p) =>
-                  `<option value="${p.id}" ${p.id === mapQuality ? 'selected' : ''}>${p.label} · ${p.width}×${p.height}</option>`,
+                  `<option value="${p.id}" ${p.id === mapQuality ? 'selected' : ''}>${p.label}</option>`,
               )
               .join('')}
           </select>
-        </label>
-        <p class="hint">Higher detail = sharper atlas and 3D globe on the next New world. HD (768×384) is default on desktop. Existing saves keep their size.</p>
-
-        <h3>Settlements</h3>
-        <label class="settlement-suggest-row">
-          Suggest
-          <select id="settlementPlan" aria-label="Settlement type to suggest">
-            <option value="mix">Full mix (recommended)</option>
-            ${SETTLEMENT_ROLES.map((r) => `<option value="${r}">${SETTLEMENT_ROLE_LABEL[r]}</option>`).join('')}
-          </select>
-        </label>
-        <label class="slider-row settlement-density-row">
-          How much land to settle
-          <strong id="settlementDensityVal">35% · about — towns</strong>
-          <input
-            id="settlementDensity"
-            type="range"
-            min="5"
-            max="100"
-            step="5"
-            value="${settlementCoveragePct}"
-            aria-label="Settlement density percent of inhabitable land"
-          />
-        </label>
-        <div class="action-row">
-          <button type="button" id="suggestSettlements">Suggest settlements</button>
-          <button type="button" id="clearCities">Clear all</button>
         </div>
-        <p class="hint" id="settlementDensityHint">Slide toward 100% to pack most habitable land. Roles follow geography — farms on plains, ports on coasts, mines in highlands.</p>
 
-        <h3>Trade routes</h3>
-        <label class="trade-route-toggle">
-          <input type="checkbox" id="showTradeRoutes" ${showTradeRoutes ? 'checked' : ''} />
-          Show sea lanes &amp; hazards
-        </label>
-        <div class="action-row">
-          <button type="button" id="suggestTradeRoutes">Suggest trade routes</button>
-          <button type="button" id="clearTradeRoutes">Clear routes</button>
+        <div id="settlementBlock" hidden>
+          <h2>Settlements</h2>
+          <label class="settlement-suggest-row">
+            Suggest
+            <select id="settlementPlan" aria-label="Settlement type to suggest">
+              <option value="mix">Full mix</option>
+              ${SETTLEMENT_ROLES.map((r) => `<option value="${r}">${SETTLEMENT_ROLE_LABEL[r]}</option>`).join('')}
+            </select>
+          </label>
+          <label class="slider-row settlement-density-row">
+            How much land to settle
+            <strong id="settlementDensityVal">35%</strong>
+            <input
+              id="settlementDensity"
+              type="range"
+              min="5"
+              max="100"
+              step="5"
+              value="${settlementCoveragePct}"
+            />
+          </label>
+          <div class="action-row">
+            <button type="button" id="suggestSettlements">Suggest settlements</button>
+            <button type="button" id="clearCities">Clear all</button>
+          </div>
+          <p class="hint" id="settlementDensityHint"></p>
+          <h3>Trade</h3>
+          <label class="trade-route-toggle">
+            <input type="checkbox" id="showTradeRoutes" ${showTradeRoutes ? 'checked' : ''} />
+            Show sea lanes
+          </label>
+          <div class="action-row">
+            <button type="button" id="suggestTradeRoutes">Suggest routes</button>
+            <button type="button" id="clearTradeRoutes">Clear routes</button>
+          </div>
         </div>
-        <p class="hint">Gold dashed lines are shipping lanes. Amber / blue / red washes mark shallow coasts, polar ice, and blocked waters — toggle off if you only want the terrain.</p>
 
         <h3>Actions</h3>
         <div class="action-row">
@@ -932,11 +953,6 @@ function renderShell() {
           <button type="button" id="resetView">Reset view</button>
           <button type="button" id="recomputeNow">Refresh climate</button>
         </div>
-
-        <p class="hint shortcuts">
-          <strong>Paint</strong> drag · <strong>Pan</strong> Space+drag or middle mouse ·
-          <strong>Zoom</strong> scroll (out grows the atlas) · <strong>Planet</strong> G · <strong>Keys</strong> 1–0 tools, C continent, [ ] brush, Z undo
-        </p>
       </aside>
 
       <section class="map-shell">
@@ -952,10 +968,10 @@ function renderShell() {
           <span id="hudZoom">100%</span>
           <button type="button" class="view-toggle active" id="viewAtlas" title="Flat atlas">Atlas</button>
           <button type="button" class="view-toggle" id="viewPlanet" title="Rotate the planet">Planet</button>
-          <span id="hudTool">Raise</span>
+          <span id="hudTool">Land</span>
         </div>
-        <div class="map-hint" id="mapHint" hidden>Drag to raise land</div>
-        <div class="loading" id="loading">Raising continents…</div>
+        <div class="map-hint" id="mapHint" hidden>Paint land on the empty ocean</div>
+        <div class="loading" id="loading">Clearing the sea…</div>
         <div class="api-banner" id="apiBanner" hidden></div>
         <div class="api-banner" id="confirmBanner" hidden></div>
       </section>
@@ -963,29 +979,39 @@ function renderShell() {
       <aside class="panel inspector">
         <h2>Coach</h2>
         <div id="coach" role="status" aria-live="polite"></div>
+        <div id="stageWork" class="stage-work" hidden></div>
         <h2>Inspector</h2>
         <div id="geoFlags" class="geo-flags"></div>
         <div id="inspect"></div>
         <div class="status" id="status">${status}</div>
-        <h3>Director</h3>
-        <div class="director">
-          <label class="director-label">
-            Tell the map what to change
-            <textarea id="directorPrompt" rows="3" spellcheck="true" placeholder="Make the east coast wetter and add a mining town in the highlands"></textarea>
-          </label>
-          <button type="button" id="directorRun">Apply</button>
-          <p class="hint" id="directorStatus">Plain English → raise, rivers, and settlements.</p>
+        <div id="worldbuildExtras" hidden>
+          <h3>Director</h3>
+          <div class="director">
+            <label class="director-label">
+              Tell the map what to change
+              <textarea id="directorPrompt" rows="3" spellcheck="true" placeholder="Add a mining town in the highlands"></textarea>
+            </label>
+            <button type="button" id="directorRun">Apply</button>
+            <p class="hint" id="directorStatus">Plain English → settlements.</p>
+          </div>
+          <h3>Cities</h3>
+          <ul class="city-list" id="cities"></ul>
         </div>
-
-        <h3>Cities</h3>
-        <ul class="city-list" id="cities"></ul>
       </aside>
     </div>
   `
   bind()
   startLoop()
   void boot().then(() => {
-    beginTutorialIfNeeded()
+    // Sketch-first: skip the old continent tutorial on empty ocean.
+    if (!isTutorialDone()) {
+      try {
+        localStorage.setItem('geoform.tutorial.v2.done', '1')
+      } catch {
+        /* ignore */
+      }
+    }
+    setUxStage('sketch')
   })
 }
 
@@ -1015,15 +1041,6 @@ function tutorialHooks() {
       beacon.innerHTML = `Paint here ↓<small>On this picture — green / brown land</small>`
     },
   }
-}
-
-function beginTutorialIfNeeded() {
-  if (isTutorialDone()) {
-    showCoach(coachTool(tool))
-    return
-  }
-  setMapHint(false)
-  startTutorial(document.body, tutorialHooks())
 }
 
 function replayTutorial() {
@@ -1118,22 +1135,20 @@ async function preferPythonScience(): Promise<boolean> {
   return false
 }
 
-/** New world using the TypeScript generator. Always works offline. */
+/** Empty ocean for Sketch. Always local — free draw, no generated continents. */
 function loadLocalWorld(nextSeed: number, note?: string) {
-  setBusy(true, 'Raising continents…')
-  setStatus('Generating local world…')
+  setBusy(true, 'Clearing the sea…')
+  setStatus('Empty ocean…')
   try {
     const { width, height } = worldSize()
-    const next = generateWorld(width, height, nextSeed, landRatio, continentMass)
+    const next = createEmptySeaWorld(width, height, nextSeed, planetRadiusKm)
     clearAutosave()
-    applyWorld(
-      next,
-      note ?? `Local seed ${next.seed} · paint ridges, coasts, and cities — climate follows`,
-    )
+    applyWorld(next, note ?? `Empty ocean · seed ${next.seed} — draw freely`)
     hideApiDown()
     hideConfirm()
     setMapHint(true)
     setClimatePhase('idle')
+    setUxStage('sketch')
   } catch (err) {
     mapPaintPending = false
     setBusy(false)
@@ -1142,40 +1157,18 @@ function loadLocalWorld(nextSeed: number, note?: string) {
 }
 
 /**
- * Boot: prefer Python science when /health is up.
- * Restore autosave if present; otherwise generate a new world on the chosen engine.
+ * Boot: always empty ocean for Sketch. Autosave mid-session after you paint;
+ * never reopen a continent dump as if it were a blank canvas.
  */
 async function boot() {
   hideApiDown()
-  const pythonUp = await preferPythonScience()
-
-  const saved = loadAutosave()
-  if (saved) {
-    applyWorld(
-      saved,
-      `Restored autosave (seed ${saved.seed}, ${saved.cities.length} cities).`,
-    )
-    const el = document.querySelector('#saveMeta')
-    if (el) el.textContent = 'Restored from browser autosave'
-    setMapHint(false)
-    setStatus(
-      pythonUp
-        ? `Restored autosave · Python science ready for New world`
-        : `Restored autosave · Local preview (Python API offline)`,
-    )
-    return
+  await preferPythonScience()
+  try {
+    clearAutosave()
+  } catch {
+    /* ignore */
   }
-
-  if (pythonUp) {
-    await loadWorld(seed)
-  } else {
-    loadLocalWorld(
-      seed,
-      import.meta.env.PROD
-        ? `Local seed ${seed} · paint ridges, coasts, and cities`
-        : 'Local seed — start npm run dev:api for Python science.',
-    )
-  }
+  loadLocalWorld(seed, 'Empty ocean — draw whatever you want.')
 }
 
 function setBusy(on: boolean, message?: string) {
@@ -1190,33 +1183,6 @@ function setBusy(on: boolean, message?: string) {
   })
 }
 
-/** New world: Python science when selected and healthy; otherwise Local. */
-async function loadWorld(nextSeed: number) {
-  if (engineChoice !== 'worldengine') {
-    loadLocalWorld(nextSeed)
-    return
-  }
-  setBusy(true, 'Raising continents…')
-  setStatus('Asking Python science…')
-  try {
-    if (!(await apiHealthy())) throw new Error('API offline')
-    const { width, height } = worldSize()
-    const next = await fetchWorldEngineWorld(nextSeed, width, height, 10)
-    next.landRatio = landRatio
-    next.continentMass = continentMass
-    clearAutosave()
-    applyWorld(next, `Python science seed ${next.seed}`)
-    hideApiDown()
-    setMapHint(true)
-    syncEngineUi()
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    engineChoice = 'local'
-    syncEngineUi(`Python unavailable (${msg}) — switched to Local preview.`)
-    loadLocalWorld(nextSeed, `Python unavailable (${msg}) — local engine ready.`)
-  }
-}
-
 /** After painting, wait a beat then rebuild climate/rivers. Immediate = no wait. */
 function scheduleClimateRecompute(immediate = false) {
   if (!world) return
@@ -1228,7 +1194,9 @@ function scheduleClimateRecompute(immediate = false) {
       world.engine === 'local' || engineChoice === 'local' || !(await apiHealthy())
     if (useLocal) {
       // Climate only — do not reshape continents after every brush stroke.
-      recomputeDerived(world)
+      // Skip suitability here (slow on HD); refresh when Settle layer / Worldbuild needs it.
+      recomputeDerived(world, false)
+      if (layer === 'suitability' || uxStage === 'worldbuild') recomputeSuitability(world)
       if (timelineAge > 0.5) timelineView = reconstructPast(world, timelineAge)
       invalidateRenderer()
       scheduleAutosave()
@@ -1267,7 +1235,7 @@ function scheduleClimateRecompute(immediate = false) {
     }
   }
   if (immediate) void run()
-  else recomputeTimer = window.setTimeout(() => void run(), 160)
+  else recomputeTimer = window.setTimeout(() => void run(), 280)
 }
 
 /** Snapshot undo BEFORE the stroke. One undo undoes the whole drag, not each pixel. */
@@ -1368,7 +1336,24 @@ function setTool(next: Tool) {
     setStatus('Tutorial: keep using Raise (or Ridge) on the map.')
     return
   }
+  const settlementTools: Tool[] = ['city', 'razecity']
+  if (settlementTools.includes(next) && !stageAllowsSettlements(uxStage)) {
+    uxStage = 'worldbuild'
+    syncStageChrome()
+    setStatus('Switched to Worldbuild for settlements.')
+  }
+  if (TERRAIN_TOOLS.includes(next) && uxStage === 'critique') {
+    setStatus('Critique is read-only. Switch to Sketch to paint, or Make sense to rebuild geography.')
+    return
+  }
   tool = next
+  syncToolChrome()
+  syncContinentHint()
+  syncPlacementCursor()
+  showCoach(coachTool(tool))
+}
+
+function syncToolChrome() {
   const tools = document.querySelector('#tools')
   tools?.querySelectorAll('.tool').forEach((b) => {
     b.classList.toggle('active', (b as HTMLElement).dataset.tool === tool)
@@ -1376,10 +1361,161 @@ function setTool(next: Tool) {
   const hud = document.querySelector('#hudTool')
   const def = TOOL_DEFS.find((t) => t.id === tool)
   if (hud && def) hud.innerHTML = `${TOOL_ICONS[def.id]}<span>${def.label}</span>`
-  syncContinentHint()
-  syncPlacementCursor()
-  showCoach(coachTool(tool))
 }
+
+function syncStageChrome() {
+  const rail = document.querySelector('#uxStageRail')
+  rail?.querySelectorAll<HTMLButtonElement>('[data-stage]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.stage === uxStage)
+  })
+  const sketch = document.querySelector('#sketchTools')
+  const settle = document.querySelector('#settlementBlock')
+  const extras = document.querySelector('#worldbuildExtras')
+  // Draw tools in sketch (+ critique read-only). Landmass / continents / director stay out of Sketch.
+  if (sketch instanceof HTMLElement) {
+    sketch.hidden = uxStage === 'worldbuild' || uxStage === 'alternatives'
+  }
+  if (settle instanceof HTMLElement) settle.hidden = !stageAllowsSettlements(uxStage)
+  if (extras instanceof HTMLElement) extras.hidden = uxStage !== 'worldbuild'
+  app.dataset.uxStage = uxStage
+  paintToolGrid()
+}
+
+function setUxStage(next: UxStage) {
+  uxStage = next
+  syncStageChrome()
+
+  if (uxStage === 'critique') {
+    runLiveCritique()
+    return
+  }
+  if (uxStage === 'alternatives') {
+    runMakeSense()
+    return
+  }
+  const work = document.querySelector('#stageWork')
+  if (work instanceof HTMLElement) {
+    work.hidden = true
+    work.innerHTML = ''
+  }
+  if (uxStage === 'worldbuild' && TERRAIN_TOOLS.includes(tool)) {
+    tool = 'city'
+    syncToolChrome()
+    syncPlacementCursor()
+  }
+  if (uxStage === 'sketch' && (tool === 'city' || tool === 'razecity' || tool === 'continent')) {
+    tool = 'land'
+    syncToolChrome()
+    syncPlacementCursor()
+  }
+  showCoach(coachStage(uxStage))
+}
+
+function runMakeSense() {
+  if (!world) return
+  setBusy(true, 'Making geographic sense…')
+  history.push(world, 'Make sense')
+  rememberMap(
+    'Make sense',
+    'Rebuilt the closest map to your sketch that obeys geography — drainage, coasts, climate.',
+  )
+  // Snapshot sketch critique first so we can show what was wrong.
+  if (!lastCritique) lastCritique = critiqueLiveWorld(world)
+  const beforeScore = lastCritique.score
+  const { applied } = harmonizeToGeography(world)
+  lastCritique = critiqueLiveWorld(world)
+  timelineView = null
+  timelineAge = 0
+  invalidateRenderer()
+  updateHistoryButtons()
+  scheduleAutosave()
+  setBusy(false)
+  const el = document.querySelector('#stageWork')
+  if (el instanceof HTMLElement) {
+    el.hidden = false
+    el.innerHTML = `
+      <h3>Make sense</h3>
+      <p class="hint">Closest geographically coherent map to your sketch. Not a menu — already applied.</p>
+      <p><strong>${beforeScore}/100 → ${lastCritique.score}/100</strong></p>
+      <ul class="stage-alt-list">
+        ${applied.map((a) => `<li class="stage-alt"><strong>${escapeStageHtml(a)}</strong></li>`).join('')}
+      </ul>
+      <button type="button" class="primary" id="stageGoWorldbuild">Worldbuild</button>
+    `
+    el.querySelector('#stageGoWorldbuild')?.addEventListener('click', () => setUxStage('worldbuild'))
+  }
+  showCoach(
+    coachStage(
+      'alternatives',
+      `Done. Critique ${beforeScore} → ${lastCritique.score}. ${applied.slice(0, 3).join(' · ')}.`,
+    ),
+  )
+  setStatus(`Make sense · ${beforeScore} → ${lastCritique.score}`)
+  announceChange('Make sense', applied.join('. ') + '.')
+}
+
+function runLiveCritique(showPanel = true) {
+  if (!world) return
+  recomputeDerived(world, true)
+  invalidateRenderer()
+  lastCritique = critiqueLiveWorld(world)
+  if (showPanel) paintStageWork()
+  const top = lastCritique.issues.slice(0, 3).map((i) => i.title).join(' · ')
+  showCoach(
+    coachStage(
+      'critique',
+      `Score ${lastCritique.score}/100. ${lastCritique.summary}${top ? ` Top: ${top}.` : ''}`,
+    ),
+  )
+  setStatus(`Critique ${lastCritique.score}/100 · ${lastCritique.issues.length} issues`)
+}
+
+function paintStageWork() {
+  const el = document.querySelector('#stageWork')
+  if (!(el instanceof HTMLElement)) return
+  if (uxStage === 'critique' && lastCritique) {
+    el.hidden = false
+    const issues = lastCritique.issues.slice(0, 14)
+    el.innerHTML = `
+      <h3>Critique · ${lastCritique.score}/100</h3>
+      <p class="hint">${escapeStageHtml(lastCritique.summary)}</p>
+      <ul class="stage-issue-list">
+        ${issues
+          .map(
+            (i) => `
+          <li class="stage-issue sev-${i.severity}">
+            <strong>${escapeStageHtml(i.title)}</strong>
+            <span class="stage-issue-meta">${SEVERITY_LABEL[i.severity]} · ${KIND_LABEL[i.kind]}</span>
+            <p>${escapeStageHtml(i.critique)}</p>
+          </li>`,
+          )
+          .join('')}
+      </ul>
+      <button type="button" class="primary" id="stageGoMakeSense">Make sense</button>
+    `
+    el.querySelector('#stageGoMakeSense')?.addEventListener('click', () => setUxStage('alternatives'))
+    return
+  }
+}
+
+function escapeStageHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const SKETCH_TOOLS: Tool[] = [
+  'land',
+  'raise',
+  'lower',
+  'ridge',
+  'smooth',
+  'channel',
+  'sea',
+  'inspect',
+]
 
 const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'raise', label: 'Raise', desc: 'Uplift mountains & hills', key: '1' },
@@ -1390,11 +1526,44 @@ const TOOL_DEFS: { id: Tool; label: string; desc: string; key: string }[] = [
   { id: 'plateau', label: 'Plateau', desc: 'Flatten a highland', key: '6' },
   { id: 'sea', label: 'Ocean', desc: 'Paint below sea level', key: '7' },
   { id: 'land', label: 'Land', desc: 'Raise above the sea', key: '8' },
-  { id: 'city', label: 'Found city', desc: 'Any viable land — ocean, peaks, cliffs blocked', key: '9' },
+  { id: 'city', label: 'Found city', desc: 'Place a settlement', key: '9' },
   { id: 'razecity', label: 'Raze city', desc: 'Remove a nearby city', key: '0' },
-  { id: 'inspect', label: 'Inspect', desc: 'Read cell climate & score', key: 'I' },
-  { id: 'continent', label: 'Add continent', desc: 'Click open ocean only', key: 'C' },
+  { id: 'inspect', label: 'Inspect', desc: 'Read cell climate', key: 'I' },
+  { id: 'continent', label: 'Add continent', desc: 'Click open ocean', key: 'C' },
 ]
+
+function toolsForStage(): typeof TOOL_DEFS {
+  if (uxStage === 'worldbuild') {
+    return TOOL_DEFS.filter((t) => t.id === 'city' || t.id === 'razecity' || t.id === 'inspect')
+  }
+  if (uxStage === 'alternatives' || uxStage === 'critique') {
+    return TOOL_DEFS.filter((t) => t.id === 'inspect')
+  }
+  return TOOL_DEFS.filter((t) => SKETCH_TOOLS.includes(t.id))
+}
+
+function paintToolGrid() {
+  const tools = document.querySelector('#tools')
+  if (!tools) return
+  const defs = toolsForStage()
+  if (!defs.some((t) => t.id === tool) && defs[0]) tool = defs[0].id
+  tools.innerHTML = defs
+    .map(
+      (t) =>
+        `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}" title="${t.desc}">
+        <span class="tool-main">
+          <span class="tool-label">${TOOL_ICONS[t.id]}<span>${t.label}</span></span>
+          <kbd>${t.key}</kbd>
+        </span>
+        <small>${t.desc}</small>
+      </button>`,
+    )
+    .join('')
+  tools.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
+    btn.addEventListener('click', () => setTool(btn.dataset.tool as Tool))
+  })
+  syncToolChrome()
+}
 
 /** Live gate for the cell under the cursor (city / continent / raze). */
 function hoverPlacementGate() {
@@ -1426,25 +1595,15 @@ function syncPlacementCursor() {
 
 /** Mouse / keyboard / slider wiring. This is most of the page's behavior. */
 function bind() {
-  const tools = document.querySelector('#tools')!
-  tools.innerHTML = TOOL_DEFS.map(
-    (t) =>
-      `<button type="button" class="tool ${tool === t.id ? 'active' : ''}" data-tool="${t.id}" title="${t.desc}">
-        <span class="tool-main">
-          <span class="tool-label">${TOOL_ICONS[t.id]}<span>${t.label}</span></span>
-          <kbd>${t.key}</kbd>
-        </span>
-        <small>${t.desc}</small>
-      </button>`,
-  ).join('')
-  tools.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach((btn) => {
-    btn.addEventListener('click', () => setTool(btn.dataset.tool as Tool))
+  document.querySelectorAll<HTMLButtonElement>('#uxStageRail [data-stage]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.stage as UxStage
+      if (id) setUxStage(id)
+    })
   })
-  const hudTool = document.querySelector('#hudTool')
-  if (hudTool) {
-    const def = TOOL_DEFS.find((t) => t.id === tool)
-    if (def) hudTool.innerHTML = `${TOOL_ICONS[def.id]}<span>${def.label}</span>`
-  }
+
+  const tools = document.querySelector('#tools')
+  if (tools) paintToolGrid()
 
   const styles = document.querySelector('#continentStyles')
   if (styles) {
@@ -1591,8 +1750,8 @@ function bind() {
   const landInput = document.querySelector<HTMLInputElement>('#landRatio')
   landInput?.addEventListener('input', (e) => {
     landRatio = Number((e.target as HTMLInputElement).value) / 100
-    document.querySelector('#landVal')!.textContent = String(Math.round(landRatio * 100))
-    document.querySelector('#waterVal')!.textContent = String(Math.round((1 - landRatio) * 100))
+    document.querySelector('#landVal')?.replaceChildren(document.createTextNode(String(Math.round(landRatio * 100))))
+    document.querySelector('#waterVal')?.replaceChildren(document.createTextNode(String(Math.round((1 - landRatio) * 100))))
     showCoach(coachLandRatio(Math.round(landRatio * 100)))
     if (!world || busy) return
     if (!strokeActive)
@@ -1611,6 +1770,24 @@ function bind() {
   landInput?.addEventListener('change', () => {
     if (!world) return
     endStroke()
+  })
+
+  const radiusInput = document.querySelector<HTMLInputElement>('#planetRadius')
+  radiusInput?.addEventListener('input', (e) => {
+    planetRadiusKm = clampPlanetRadiusKm(Number((e.target as HTMLInputElement).value))
+    document.querySelector('#radiusVal')!.textContent = String(planetRadiusKm)
+    if (world) world.planetRadiusKm = planetRadiusKm
+    showCoach({
+      title: `Planet · ${planetRadiusKm} km`,
+      tip: `Radius from ${PLANET_RADIUS_MIN_KM}–${PLANET_RADIUS_MAX_KM} km (Earth ≈ 6371). Larger worlds get gentler mountain cooling.`,
+      next: 'Draw land first. Climate uses this when you refresh or Make sense.',
+      tone: 'tip',
+    })
+  })
+  radiusInput?.addEventListener('change', () => {
+    if (!world) return
+    world.planetRadiusKm = planetRadiusKm
+    scheduleClimateRecompute(true)
   })
 
   const timeInput = document.querySelector<HTMLInputElement>('#timeline')
@@ -1795,14 +1972,14 @@ function bind() {
 
   document.querySelector('#regen')!.addEventListener('click', () => {
     if (busy || isTutorialBlocking()) {
-      if (isTutorialBlocking()) setStatus('Finish the tutorial before generating a new world.')
+      if (isTutorialBlocking()) setStatus('Finish the tutorial first.')
       return
     }
     askNewWorld(() => {
       seed = (Math.random() * 1e9) | 0
       const seedInput = document.querySelector<HTMLInputElement>('#seed')
       if (seedInput) seedInput.value = String(seed)
-      void loadWorld(seed)
+      loadLocalWorld(seed, 'Empty ocean — draw freely.')
     })
   })
   document.querySelector('#randomize')!.addEventListener('click', () => {
@@ -1991,6 +2168,10 @@ function bind() {
     }
 
     if (!TERRAIN_TOOLS.includes(tool)) return
+    if (uxStage !== 'sketch') {
+      setStatus('Paint only in Sketch. Critique tears the map apart; Make sense rebuilds it.')
+      return
+    }
 
     if (!strokeActive) {
       beginStroke(TOOL_DEFS.find((t) => t.id === tool)?.label ?? 'Edit')

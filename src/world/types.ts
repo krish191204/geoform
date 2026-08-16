@@ -154,6 +154,11 @@ export interface World {
    * padding does not suddenly restyle climate (equator would jump).
    */
   latRows: number
+  /**
+   * Mean planetary radius in km. Earth ≈ 6371. Affects climate scale cues
+   * (lapse / continentality). Sketch slider writes this.
+   */
+  planetRadiusKm?: number
 }
 
 const FALLBACK_BIOME = '#6e7f6a'

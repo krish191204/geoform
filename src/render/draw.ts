@@ -860,11 +860,12 @@ export class MapRenderer {
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
 
-    // Throttled water shimmer (every 3rd frame) — skip while dragging a brush
+    // Throttled water shimmer — skip on large maps (HD+); clones whole ImageData.
     if (
       !opts.painting &&
       !reduceMotion &&
-      cw * ch <= 400_000 &&
+      world.width * world.height <= 140_000 &&
+      cw * ch <= 280_000 &&
       (opts.layer === 'relief' || opts.layer === 'biome' || opts.layer === 'elevation')
     ) {
       this.shimmerFrame++

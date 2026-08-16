@@ -21,7 +21,7 @@ export interface CoachMessage {
 const TOOL_COACH: Record<Tool, CoachMessage> = {
   raise: {
     title: 'Raise',
-    tip: 'Drag on land to push hills and mountains up. Harder strength = faster change.',
+    tip: 'Drag to push hills and mountains up. Harder strength = faster change.',
     next: 'Release the mouse — rivers and climate catch up. Try Ridge for a mountain chain.',
     tone: 'go',
   },
@@ -64,7 +64,7 @@ const TOOL_COACH: Record<Tool, CoachMessage> = {
   land: {
     title: 'Land',
     tip: 'Raises cells above the sea — quick coasts and islands.',
-    next: 'If Full continents is on, tiny lonely blobs may drown on Refresh.',
+    next: 'Use Raise or Ridge to add relief. Critique later if the shape fails as geography.',
     tone: 'go',
   },
   city: {
@@ -227,8 +227,44 @@ export function coachView(mode: 'atlas' | 'planet'): CoachMessage {
   }
   return {
     title: 'Atlas view',
-    tip: 'Flat map for painting. Scroll zooms; Space+drag pans.',
-    next: 'Pick Raise and drag on land to sculpt.',
+    tip: 'Flat schematic atlas — paint here. Planet is the same grids spun into a globe.',
+    next: 'Use the stage rail: Sketch → Critique → Make sense → Worldbuild.',
+    tone: 'tip',
+  }
+}
+
+export function coachStage(
+  stage: 'sketch' | 'critique' | 'alternatives' | 'worldbuild',
+  extra?: string,
+): CoachMessage {
+  if (stage === 'sketch') {
+    return {
+      title: 'Sketch',
+      tip: 'Empty ocean. Paint land with Raise, Land, or Ridge — free game, no geography police yet.',
+      next: 'When you are done drawing, open Critique.',
+      tone: 'go',
+    }
+  }
+  if (stage === 'critique') {
+    return {
+      title: 'Critique',
+      tip: extra || 'Tearing your sketch apart as geography — drainage, climate, coasts, rain shadows.',
+      next: 'Next: Make sense rebuilds the closest believable map from what you drew.',
+      tone: 'warn',
+    }
+  }
+  if (stage === 'alternatives') {
+    return {
+      title: 'Make sense',
+      tip: extra || 'Rebuilding the closest map to your sketch that obeys geography.',
+      next: 'Then Worldbuild for cities and trade.',
+      tone: 'ok',
+    }
+  }
+  return {
+    title: 'Worldbuild',
+    tip: 'Found cities and trade on the map you committed.',
+    next: 'Go back to Sketch only if you want a new empty ocean.',
     tone: 'go',
   }
 }
